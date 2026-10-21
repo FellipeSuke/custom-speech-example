@@ -1,0 +1,10 @@
+services:
+  speech-adapter:
+    build: .
+    ports:
+      - "${ADAPTER_BIND_ADDRESS:-0.0.0.0}:${ADAPTER_PORT:-8086}:3000"
+    env_file:
+      - .env.local
+    environment:
+      HTTP_PORT: 3000
+    restart: unless-stopped

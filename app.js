@@ -1,72 +1,86 @@
 const express = require('express');
-const app = express();
+const crypto = require('node:crypto');
+const dns = require('node:dns');
 const Websocket = require('ws');
+dns.setDefaultResultOrder('ipv4first');
 const opts = Object.assign({level: process.env.LOGLEVEL || 'info'});
 const logger = require('pino')(opts);
-const port = process.env.HTTP_PORT || 3000;
 const routes = require('./lib/tts');
-app.locals = {...app.locals, logger};
 
-const isValidApiKey = (hdr, apiKey) => {
-  const arr = /^Bearer (.*)$/.exec(hdr);
-  return !arr || arr[1] === process.env.API_KEY;
+const getExpectedApiKey = () => process.env.COGNIGY_SPEECH_TOKEN || process.env.API_KEY;
+
+const isValidApiKey = (hdr, apiKey = getExpectedApiKey()) => {
+  if (typeof hdr !== 'string' || typeof apiKey !== 'string' || !apiKey) return false;
+  const match = /^Bearer\s+(.+)$/i.exec(hdr.trim());
+  if (!match || !match[1].trim()) return false;
+  const actual = Buffer.from(match[1].trim());
+  const expected = Buffer.from(apiKey);
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 };
 
 const verifyApiKey = (req, res, next) => {
-  if (!isValidApiKey(req.headers['authorization'], process.env.API_KEY)) {
+  if (!isValidApiKey(req.headers.authorization)) {
     return res.status(403).json({ message: 'Forbidden' });
   }
   next();
 };
 
-/* set up a websocket server for the STT api */
-const transcribe = require('./lib/stt/');
-const transcribeWsServer = new Websocket.Server({ noServer: true });
-transcribeWsServer.setMaxListeners(0);
-transcribeWsServer.on('connection', transcribe.bind(null, logger));
+const createApp = () => {
+  const app = express();
+  app.locals = {...app.locals, logger};
 
-/*
- * The TTS api is HTTP only. Both non-streaming and streaming custom TTS use the
- * same POST endpoint (see lib/tts/); streaming is achieved by streaming the
- * WAV response body rather than buffering it. See the VoiceGateway streaming
- * custom-TTS contract for details.
- */
+  app.get('/healthz', (req, res) => res.json({
+    status: 'ok',
+    openaiConfigured: Boolean(process.env.OPENAI_API_KEY),
+    openaiConnectivity: 'not_checked'
+  }));
 
-/* set up the http server for the TTS api */
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-app.use('/synthesize', verifyApiKey, routes);
-app.use((err, req, res, next) => {
-  logger.error(err, 'burped error');
-  res.status(err.status || 500).json({msg: err.message});
-});
-
-const server = app.listen(port, () => {
-  logger.info(`Example Cognigy Voice Gateway speech server listening at http://localhost:${port}`);
-});
-
-/* handle websocket upgrade requests */
-server.on('upgrade', (request, socket, head) => {
-  logger.debug({
-    url: request.url,
-    headers: request.headers,
-  }, 'received upgrade request');
-
-  /* only STT uses websockets; TTS (streaming and non-streaming) is HTTP */
-  if (!request.url.startsWith('/transcribe')) {
-    logger.info(`unhandled path: ${request.url}`);
-    return socket.write('HTTP/1.1 404 Not Found \r\n\r\n', () => socket.destroy());
-  }
-
-  /* verify the api key */
-  if (!isValidApiKey(request.headers['authorization'], process.env.API_KEY)) {
-    logger.info(`invalid auth header: ${request.headers['authorization']}`);
-    return socket.write('HTTP/1.1 403 Forbidden \r\n\r\n', () => socket.destroy());
-  }
-
-  /* complete the upgrade */
-  transcribeWsServer.handleUpgrade(request, socket, head, (ws) => {
-    logger.info(`upgraded to websocket, url: ${request.url}`);
-    transcribeWsServer.emit('connection', ws, request.url);
+  app.use(express.urlencoded({ extended: true, limit: process.env.HTTP_BODY_LIMIT || '128kb' }));
+  app.use(express.json({ limit: process.env.HTTP_BODY_LIMIT || '128kb' }));
+  app.use('/synthesize', verifyApiKey, routes);
+  app.use((err, req, res, next) => {
+    logger.error({err: err.message}, 'request failed');
+    if (res.headersSent) return next(err);
+    res.status(err.status || 500).json({message: 'Internal server error'});
   });
-});
+  return app;
+};
+
+const createServer = ({app = createApp(), port = process.env.HTTP_PORT || 3000} = {}) => {
+  const transcribe = require('./lib/stt/');
+  const transcribeWsServer = new Websocket.Server({ noServer: true });
+  transcribeWsServer.setMaxListeners(0);
+  transcribeWsServer.on('connection', transcribe.bind(null, logger));
+
+  const server = app.listen(port, () => {
+    logger.info('Example Cognigy Voice Gateway speech server listening');
+  });
+
+  server.on('upgrade', (request, socket, head) => {
+    let pathname;
+    try {
+      pathname = new URL(request.url, 'http://localhost').pathname;
+    } catch {
+      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n', () => socket.destroy());
+      return;
+    }
+
+    if (!pathname.startsWith('/transcribe/')) {
+      return socket.write('HTTP/1.1 404 Not Found\r\n\r\n', () => socket.destroy());
+    }
+
+    if (!isValidApiKey(request.headers.authorization)) {
+      return socket.write('HTTP/1.1 403 Forbidden\r\n\r\n', () => socket.destroy());
+    }
+
+    transcribeWsServer.handleUpgrade(request, socket, head, (ws) => {
+      transcribeWsServer.emit('connection', ws, request.url);
+    });
+  });
+
+  return server;
+};
+
+if (require.main === module) createServer();
+
+module.exports = {createApp, createServer, isValidApiKey};

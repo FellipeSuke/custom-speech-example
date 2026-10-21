@@ -1,0 +1,146 @@
+const assert = require('node:assert/strict');
+const {EventEmitter} = require('node:events');
+const {test} = require('node:test');
+const {
+  synthesizeText,
+  buildSessionUpdate,
+  buildResponseCreate,
+  REALTIME_VOICES,
+  synthesizeSpeechHttp,
+  streamSpeechHttp
+} = require('../lib/tts/openai');
+const {createWavPcm16Mono, parseWavPcm16Mono} = require('../lib/audio/pcm');
+
+class FakeWebSocket extends EventEmitter {
+  static OPEN = 1;
+  static CONNECTING = 0;
+
+  constructor() {
+    super();
+    this.readyState = FakeWebSocket.CONNECTING;
+    this.sent = [];
+    setImmediate(() => {
+      this.readyState = FakeWebSocket.OPEN;
+      this.emit('open');
+    });
+  }
+
+  send(payload) {
+    const event = JSON.parse(payload);
+    this.sent.push(event);
+    if (event.type !== 'response.create') return;
+    const audio = Buffer.alloc(12);
+    audio.writeInt16LE(1000, 0);
+    audio.writeInt16LE(-1000, 2);
+    setImmediate(() => {
+      this.emit('message', Buffer.from(JSON.stringify({
+        type: 'response.output_audio.delta',
+        delta: audio.toString('base64')
+      })));
+      this.emit('message', Buffer.from(JSON.stringify({
+        type: 'response.done',
+        response: {status: 'completed'}
+      })));
+    });
+  }
+
+  close() {
+    this.readyState = 3;
+  }
+}
+
+test('builds the current Realtime TTS events', () => {
+  const session = buildSessionUpdate('gpt-realtime-2.1-mini', 'marin');
+  assert.equal(session.type, 'session.update');
+  assert.equal(session.session.model, 'gpt-realtime-2.1-mini');
+  assert.deepEqual(session.session.output_modalities, ['audio']);
+  assert.equal(session.session.audio.output.format.rate, 24000);
+
+  const response = buildResponseCreate('A resposta exata.');
+  assert.equal(response.type, 'response.create');
+  assert.equal(response.response.conversation, 'none');
+  assert.equal(response.response.input[0].content[0].text, 'A resposta exata.');
+});
+
+test('collects mocked Realtime audio without contacting OpenAI', async () => {
+  const result = await synthesizeText({
+    apiKey: 'test-key',
+    text: 'CNPJ três quatro.',
+    voice: 'marin',
+    WebSocketImpl: FakeWebSocket
+  });
+  assert.equal(result.pcm.length, 12);
+  assert.ok(result.durationMs >= 0);
+  assert.ok(REALTIME_VOICES.includes('marin'));
+});
+
+test('rejects an unallowlisted voice before opening a provider connection', async () => {
+  await assert.rejects(
+    synthesizeText({apiKey: 'test-key', text: 'teste', voice: 'arbitrary-voice', WebSocketImpl: FakeWebSocket}),
+    (error) => error.code === 'invalid_voice'
+  );
+});
+
+test('supports the temporary HTTP Speech API transport with mocked fetch', async () => {
+  const expectedWav = createWavPcm16Mono(Buffer.alloc(6), 24000);
+  let request;
+  const result = await synthesizeSpeechHttp({
+    apiKey: 'test-key',
+    model: 'gpt-4o-mini-tts',
+    voice: 'marin',
+    text: 'Texto de teste.',
+    fetchImpl: async (url, options) => {
+      request = {url, options, body: JSON.parse(options.body)};
+      return {ok: true, status: 200, arrayBuffer: async () => expectedWav};
+    }
+  });
+  assert.match(request.url, /\/audio\/speech$/);
+  assert.equal(request.options.headers.Authorization, 'Bearer test-key');
+  assert.equal(request.body.model, 'gpt-4o-mini-tts');
+  assert.equal(request.body.response_format, 'wav');
+  assert.equal(result.sampleRate, 24000);
+  assert.equal(result.pcm.length, 6);
+});
+
+test('streams Speech API PCM as chunked 8 kHz WAV and preserves split samples', async () => {
+  const source = Buffer.alloc(18);
+  [1000, 2000, 3000, -1000, -2000, -3000, 4000, 5000, 6000].forEach((sample, index) => source.writeInt16LE(sample, index * 2));
+  const chunks = [source.subarray(0, 1), source.subarray(1, 6), source.subarray(6, 11), source.subarray(11)];
+  const written = [];
+  const headers = {};
+  let ended = false;
+  let request;
+  let firstAudioMs;
+  const response = {
+    setHeader(name, value) { headers[name.toLowerCase()] = value; },
+    removeHeader(name) { delete headers[name.toLowerCase()]; },
+    flushHeaders() {},
+    write(chunk) { written.push(Buffer.from(chunk)); },
+    end() { ended = true; }
+  };
+
+  const result = await streamSpeechHttp({
+    apiKey: 'test-key',
+    model: 'gpt-4o-mini-tts',
+    voice: 'marin',
+    text: 'Texto de teste.',
+    response,
+    onFirstAudio: (value) => { firstAudioMs = value; },
+    fetchImpl: async (url, options) => {
+      request = {url, body: JSON.parse(options.body)};
+      return {ok: true, status: 200, body: (async function*() { for (const chunk of chunks) yield chunk; })()};
+    }
+  });
+
+  const wav = parseWavPcm16Mono(Buffer.concat(written));
+  assert.match(request.url, /\/audio\/speech$/);
+  assert.equal(request.body.response_format, 'pcm');
+  assert.equal(request.body.stream_format, 'audio');
+  assert.equal(headers['content-type'], 'audio/wav');
+  assert.equal(headers['content-length'], undefined);
+  assert.equal(wav.sampleRate, 8000);
+  assert.deepEqual(Array.from({length: 3}, (_, index) => wav.pcm.readInt16LE(index * 2)), [2000, -2000, 5000]);
+  assert.equal(result.bytes, 6);
+  assert.equal(ended, true);
+  assert.ok(firstAudioMs >= 0);
+});

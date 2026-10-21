@@ -18,6 +18,16 @@ using the speech API. It showcases the incorporation of the following examples:
 - [assemblyAI](https://www.assemblyai.com/docs/walkthroughs#realtime-streaming-transcription)
 - [Vosk](https://alphacephei.com/vosk/server).
 
+The repository also contains an OpenAI TTS adapter at
+`/synthesize/openai`. It defaults to Realtime with `gpt-realtime-2.1-mini`,
+but supports a temporary HTTP compatibility mode with `gpt-4o-mini-tts` when
+the OpenAI project does not have Realtime model access. It buffers the
+complete response for the first non-streaming mode, converts PCM16 to WAV
+PCM16 mono, and returns 8 kHz by default. The OpenAI STT adapter is available
+at `/transcribe/openai`; it translates Cognigy's audio WebSocket protocol to
+OpenAI Realtime transcription and uses local silence detection to delimit
+turns.
+
 ## TTS: non-streaming vs. streaming
 
 Custom TTS vendors support two modes over the **same HTTP endpoint**:
@@ -58,13 +68,28 @@ some depending on the environment variables supplied.
 - To use assemblyAI, supply `ASSEMBLY_AI_API_TOKEN` which has your assemblyAI api key
 - To use gladia, supply `GLADIA_API_KEY`
 - To use Vosk, supply `VOSK_URL` which has the ip:port of the Vosk server grpc endpoint
+- To use OpenAI TTS, supply `OPENAI_API_KEY`. Set `OPENAI_TTS_VOICE` to an
+  allowlisted Realtime voice; `OPENAI_TTS_ALLOWED_VOICES` can narrow the list.
+- For the temporary project-compatible mode, set
+  `OPENAI_TTS_TRANSPORT=audio_speech` and `OPENAI_TTS_MODEL=gpt-4o-mini-tts`.
+- For lower time-to-first-audio with Cognigy streaming TTS, also set
+  `TTS_STREAMING_ENABLED=true`. This uses the Speech API's chunked PCM response,
+  converts it to the required mono PCM16 WAV at 8 kHz, and omits
+  `Content-Length`. Enable **text-to-speech streaming** on the Cognigy speech
+  credential; requests at other sample rates use the buffered fallback.
+- Set `COGNIGY_SPEECH_TOKEN` or `API_KEY` for the bearer token Cognigy must send.
+  Missing, empty, and invalid bearer tokens are rejected for HTTP and WebSocket.
+
+Copy `.env.example` to an ignored `.env.local` and fill it locally. Never put a
+real key in Git or in a request to this chat.
 
 ## Running
 
 ```bash
 $ npm ci
 
-$ API_KEY=<apikey> \
+$ API_KEY=<cognigy-token> \
+OPENAI_API_KEY=<openai-key> \
 GCP_JSON_KEY_FILE=<google-json-key-path> \
 ASSEMBLY_AI_API_TOKEN=<assemblyai-api-key> \
 VOSK_URL=xxxx:yyyy \
@@ -82,6 +107,12 @@ and your api key (`apikey`).
 - **TTS** connects over HTTP POST at `/synthesize/<provider-name>` — for both
   streaming and non-streaming vendors.
 
+For the deployed OpenAI STT adapter, the Cognigy WebSocket URL is:
+
+```text
+wss://sukeserver.ddns.net:8086/transcribe/openai
+```
+
 To use a **streaming** TTS vendor (e.g. `deepgram`), also check
 **"Enable text-to-speech streaming"** on the custom speech credential. Leave it
 unchecked to use the non-streaming path.
@@ -89,3 +120,40 @@ unchecked to use the non-streaming path.
 After adding the custom speech vendors you can use them in a Cognigy Voice Gateway
 application. Make sure this application is running and accessible at the URLs
 you provisioned into Cognigy Voice Gateway.
+
+### OpenAI TTS local test
+
+Start the service with `npm start`, then use an authenticated request. The
+response is a WAV file, so it can be inspected with `ffprobe` or a media player:
+
+```bash
+curl -X POST http://localhost:3000/synthesize/openai \
+  -H "Authorization: Bearer <cognigy-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Olá. Informe o CNPJ, por favor.","type":"text","language":"pt-BR","voice":"marin","encoding":"linear16","sample_rate":8000}' \
+  --output openai-tts.wav
+```
+
+With Docker Compose, the default host port is `8086` and the container listens
+on `3000`. Set `ADAPTER_BIND_ADDRESS` and `ADAPTER_PORT` in `.env.local` if
+that port is later occupied.
+
+### External HTTPS with the existing Caddy
+
+When another application already owns ports `80` and `443`, keep the adapter
+private on the host and let the existing Caddy terminate TLS. In the test
+deployment, Caddy listens on `https://sukeserver.ddns.net:8086` and proxies to
+the adapter container over the Docker network. The Cognigy TTS URL is:
+
+```text
+https://sukeserver.ddns.net:8086/synthesize/openai
+```
+
+The adapter should not also publish host port `8086` in this arrangement; that
+port belongs to Caddy. Keep the Cognigy bearer token in `.env.local` with mode
+`600`, and do not place provider keys in this README or in Git.
+
+`type: "ssml"` is rejected deliberately in this sprint. Streaming TTS remains
+separate. OpenAI STT emits interim/final Cognigy messages and uses local VAD;
+tune `OPENAI_STT_SILENCE_MS`, `OPENAI_STT_MIN_SPEECH_MS`, and
+`OPENAI_STT_VAD_RMS` in `.env.local` when adapting turn detection.

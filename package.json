@@ -4,7 +4,7 @@
   "description": "Example of using Cognigy Voice Gateway custom speech api for TTS and STT",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test",
     "jslint": "eslint app.js lib",
     "start": "node app.js",
     "build": "./build_stubs.sh"
