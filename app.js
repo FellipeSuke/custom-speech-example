@@ -6,6 +6,7 @@ dns.setDefaultResultOrder('ipv4first');
 const opts = Object.assign({level: process.env.LOGLEVEL || 'info'});
 const logger = require('pino')(opts);
 const routes = require('./lib/tts');
+const MAX_COGNIGY_WS_MESSAGE_BYTES = 256 * 1024;
 
 const getExpectedApiKey = () => process.env.COGNIGY_SPEECH_TOKEN || process.env.API_KEY;
 
@@ -49,7 +50,7 @@ const createApp = () => {
 
 const createServer = ({app = createApp(), port = process.env.HTTP_PORT || 3000} = {}) => {
   const transcribe = require('./lib/stt/');
-  const transcribeWsServer = new Websocket.Server({ noServer: true });
+  const transcribeWsServer = new Websocket.Server({ noServer: true, maxPayload: MAX_COGNIGY_WS_MESSAGE_BYTES });
   transcribeWsServer.setMaxListeners(0);
   transcribeWsServer.on('connection', transcribe.bind(null, logger));
 

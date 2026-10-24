@@ -75,12 +75,14 @@ test('builds the current Realtime TTS events', () => {
   const session = buildSessionUpdate('gpt-realtime-2.1-mini', 'marin');
   assert.equal(session.type, 'session.update');
   assert.equal(session.session.model, 'gpt-realtime-2.1-mini');
+  assert.equal(session.session.reasoning.effort, 'minimal');
   assert.deepEqual(session.session.output_modalities, ['audio']);
   assert.equal(session.session.audio.output.format.rate, 24000);
 
   const response = buildResponseCreate('A resposta exata.');
   assert.equal(response.type, 'response.create');
   assert.equal(response.response.conversation, 'none');
+  assert.equal(response.response.max_output_tokens, 4096);
   assert.equal(response.response.input[0].content[0].text, 'A resposta exata.');
 });
 

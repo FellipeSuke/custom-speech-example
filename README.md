@@ -77,6 +77,8 @@ some depending on the environment variables supplied.
 - Realtime TTS accepts only `gpt-realtime-2.1-mini` and `gpt-realtime-2.1` and
   requires `OPENAI_TTS_TRANSPORT=realtime`. These models must not be sent to
   `/v1/audio/speech`.
+- Set `OPENAI_TTS_REASONING_EFFORT=minimal` for exact-text TTS. Higher effort
+  is available for integrations that intentionally trade latency for reasoning.
 - For the temporary project-compatible mode, set
   `OPENAI_TTS_TRANSPORT=audio_speech` and `OPENAI_TTS_MODEL=gpt-4o-mini-tts`.
 - For lower time-to-first-audio with Cognigy streaming TTS, also set
@@ -87,6 +89,8 @@ some depending on the environment variables supplied.
   speech credential; requests at other sample rates use the buffered fallback.
 - Set `COGNIGY_SPEECH_TOKEN` or `API_KEY` for the bearer token Cognigy must send.
   Missing, empty, and invalid bearer tokens are rejected for HTTP and WebSocket.
+- `OPENAI_TTS_MAX_CONCURRENCY` limits active TTS requests per adapter process
+  (default `8`); excess calls receive `429` with `Retry-After: 1`.
 
 Copy `.env.example` to an ignored `.env.local` and fill it locally. Never put a
 real key in Git or in a request to this chat.

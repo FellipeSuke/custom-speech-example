@@ -69,6 +69,22 @@ test('builds an OpenAI transcription session for Cognigy audio', () => {
   assert.equal(session.session.audio.input.turn_detection, null);
 });
 
+test('rejects unsupported Cognigy audio sample rates', async () => {
+  const previous = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'test-key';
+  try {
+    const socket = new FakeCognigySocket();
+    await transcribeOpenAI({info() {}, error() {}}, socket, {WebSocketImpl: FakeProvider});
+    socket.emit('message', Buffer.from(JSON.stringify({type: 'start', sampleRateHz: 11025})), false);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(socket.readyState, 3);
+    assert.equal(FakeProvider.instances.length, 0);
+  } finally {
+    if (previous === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previous;
+  }
+});
+
 test('uses language hints and low delay for the live transcription model', () => {
   const session = buildSessionUpdate({language: 'pt-BR', model: 'gpt-live-transcribe'});
   assert.deepEqual(session.session.audio.input.transcription.languages, ['pt']);
