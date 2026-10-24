@@ -27,6 +27,7 @@ const verifyApiKey = (req, res, next) => {
 
 const createApp = () => {
   const app = express();
+  app.disable('x-powered-by');
   app.locals = {...app.locals, logger};
 
   app.get('/healthz', (req, res) => res.json({

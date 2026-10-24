@@ -6,8 +6,10 @@ const {
   buildSessionUpdate,
   buildResponseCreate,
   REALTIME_VOICES,
+  REALTIME_MODELS,
   synthesizeSpeechHttp,
-  streamSpeechHttp
+  streamSpeechHttp,
+  streamRealtimeTts
 } = require('../lib/tts/openai');
 const {createWavPcm16Mono, parseWavPcm16Mono} = require('../lib/audio/pcm');
 
@@ -49,6 +51,26 @@ class FakeWebSocket extends EventEmitter {
   }
 }
 
+class StreamingFakeWebSocket extends FakeWebSocket {
+  send(payload) {
+    const event = JSON.parse(payload);
+    this.sent.push(event);
+    if (event.type === 'session.update') {
+      setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.updated'}))));
+      return;
+    }
+    if (event.type !== 'response.create') return;
+    const audio = Buffer.alloc(18);
+    [2000, -2000, 5000, -5000, 9000, -9000, 11000, -11000, 13000].forEach((sample, index) => audio.writeInt16LE(sample, index * 2));
+    setImmediate(() => {
+      this.emit('message', Buffer.from(JSON.stringify({type: 'response.output_audio.delta', delta: audio.subarray(0, 5).toString('base64')})));
+      this.emit('message', Buffer.from(JSON.stringify({type: 'response.output_audio.delta', delta: audio.subarray(5, 12).toString('base64')})));
+      this.emit('message', Buffer.from(JSON.stringify({type: 'response.output_audio.delta', delta: audio.subarray(12).toString('base64')})));
+      this.emit('message', Buffer.from(JSON.stringify({type: 'response.done', response: {status: 'completed'}})));
+    });
+  }
+}
+
 test('builds the current Realtime TTS events', () => {
   const session = buildSessionUpdate('gpt-realtime-2.1-mini', 'marin');
   assert.equal(session.type, 'session.update');
@@ -72,6 +94,55 @@ test('collects mocked Realtime audio without contacting OpenAI', async () => {
   assert.equal(result.pcm.length, 12);
   assert.ok(result.durationMs >= 0);
   assert.ok(REALTIME_VOICES.includes('marin'));
+});
+
+test('streams mocked Realtime audio as chunked 8 kHz WAV', async () => {
+  const written = [];
+  const headers = {};
+  let ended = false;
+  let firstAudioMs;
+  const response = {
+    writableEnded: false,
+    setHeader(name, value) { headers[name.toLowerCase()] = value; },
+    removeHeader(name) { delete headers[name.toLowerCase()]; },
+    flushHeaders() {},
+    write(chunk) { written.push(Buffer.from(chunk)); },
+    end() { ended = true; this.writableEnded = true; },
+    destroy(error) { throw error; }
+  };
+
+  const result = await streamRealtimeTts({
+    apiKey: 'test-key',
+    model: 'gpt-realtime-2.1-mini',
+    voice: 'marin',
+    text: 'Texto de teste.',
+    response,
+    WebSocketImpl: StreamingFakeWebSocket,
+    onFirstAudio: (value) => { firstAudioMs = value; }
+  });
+
+  const wav = parseWavPcm16Mono(Buffer.concat(written));
+  assert.equal(REALTIME_MODELS.length, 2);
+  assert.equal(headers['content-type'], 'audio/wav');
+  assert.equal(headers['content-length'], undefined);
+  assert.equal(wav.sampleRate, 8000);
+  assert.deepEqual(Array.from({length: 3}, (_, index) => wav.pcm.readInt16LE(index * 2)), [1667, -1667, 4333]);
+  assert.equal(result.bytes, 6);
+  assert.equal(ended, true);
+  assert.ok(firstAudioMs >= 0);
+});
+
+test('rejects a non-Realtime model before opening a Realtime stream', async () => {
+  await assert.rejects(
+    streamRealtimeTts({
+      apiKey: 'test-key',
+      model: 'gpt-4o-mini-tts',
+      voice: 'marin',
+      text: 'teste',
+      response: {write() {}, end() {}}
+    }),
+    (error) => error.code === 'invalid_tts_configuration'
+  );
 });
 
 test('rejects an unallowlisted voice before opening a provider connection', async () => {

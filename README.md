@@ -19,11 +19,15 @@ using the speech API. It showcases the incorporation of the following examples:
 - [Vosk](https://alphacephei.com/vosk/server).
 
 The repository also contains an OpenAI TTS adapter at
-`/synthesize/openai`. It defaults to Realtime with `gpt-realtime-2.1-mini`,
-but supports a temporary HTTP compatibility mode with `gpt-4o-mini-tts` when
-the OpenAI project does not have Realtime model access. It buffers the
-complete response for the first non-streaming mode, converts PCM16 to WAV
-PCM16 mono, and returns 8 kHz by default. The OpenAI STT adapter is available
+`/synthesize/openai`. It defaults to Realtime with `gpt-realtime-2.1`,
+and also accepts `gpt-realtime-2.1-mini` when the project has access. Realtime
+TTS audio is produced over the
+OpenAI WebSocket contract; when streaming is enabled, PCM deltas are forwarded
+to Cognigy as an 8 kHz streamed WAV. The adapter also supports a temporary HTTP
+compatibility mode with `gpt-4o-mini-tts` when the OpenAI project does not have
+Realtime model access. It buffers the complete response for the first
+non-streaming mode, converts PCM16 to WAV PCM16 mono, and returns 8 kHz by
+default. The OpenAI STT adapter is available
 at `/transcribe/openai`; it translates Cognigy's audio WebSocket protocol to
 OpenAI Realtime transcription and uses local silence detection to delimit
 turns.
@@ -70,13 +74,17 @@ some depending on the environment variables supplied.
 - To use Vosk, supply `VOSK_URL` which has the ip:port of the Vosk server grpc endpoint
 - To use OpenAI TTS, supply `OPENAI_API_KEY`. Set `OPENAI_TTS_VOICE` to an
   allowlisted Realtime voice; `OPENAI_TTS_ALLOWED_VOICES` can narrow the list.
+- Realtime TTS accepts only `gpt-realtime-2.1-mini` and `gpt-realtime-2.1` and
+  requires `OPENAI_TTS_TRANSPORT=realtime`. These models must not be sent to
+  `/v1/audio/speech`.
 - For the temporary project-compatible mode, set
   `OPENAI_TTS_TRANSPORT=audio_speech` and `OPENAI_TTS_MODEL=gpt-4o-mini-tts`.
 - For lower time-to-first-audio with Cognigy streaming TTS, also set
-  `TTS_STREAMING_ENABLED=true`. This uses the Speech API's chunked PCM response,
-  converts it to the required mono PCM16 WAV at 8 kHz, and omits
-  `Content-Length`. Enable **text-to-speech streaming** on the Cognigy speech
-  credential; requests at other sample rates use the buffered fallback.
+  `TTS_STREAMING_ENABLED=true`. With Realtime this forwards audio deltas as
+  they arrive; with `audio_speech` it uses the Speech API's chunked PCM
+  response. Both paths convert to the required mono PCM16 WAV at 8 kHz and
+  omit `Content-Length`. Enable **text-to-speech streaming** on the Cognigy
+  speech credential; requests at other sample rates use the buffered fallback.
 - Set `COGNIGY_SPEECH_TOKEN` or `API_KEY` for the bearer token Cognigy must send.
   Missing, empty, and invalid bearer tokens are rejected for HTTP and WebSocket.
 
