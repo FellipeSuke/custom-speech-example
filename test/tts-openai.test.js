@@ -5,6 +5,7 @@ const {
   synthesizeText,
   buildSessionUpdate,
   buildResponseCreate,
+  getSpeechInstructions,
   REALTIME_VOICES,
   REALTIME_MODELS,
   synthesizeSpeechHttp,
@@ -84,6 +85,10 @@ test('builds the current Realtime TTS events', () => {
   assert.equal(response.response.conversation, 'none');
   assert.equal(response.response.max_output_tokens, 4096);
   assert.equal(response.response.input[0].content[0].text, 'A resposta exata.');
+
+  const brazilianPortugueseResponse = buildResponseCreate('Olá, tudo bem?', 'pt-BR');
+  assert.match(brazilianPortugueseResponse.response.instructions, /Brazilian Portuguese/);
+  assert.match(getSpeechInstructions('pt_BR'), /Brazilian Portuguese/);
 });
 
 test('collects mocked Realtime audio without contacting OpenAI', async () => {
@@ -162,6 +167,7 @@ test('supports the temporary HTTP Speech API transport with mocked fetch', async
     model: 'gpt-4o-mini-tts',
     voice: 'marin',
     text: 'Texto de teste.',
+    language: 'pt-BR',
     fetchImpl: async (url, options) => {
       request = {url, options, body: JSON.parse(options.body)};
       return {ok: true, status: 200, arrayBuffer: async () => expectedWav};
@@ -171,6 +177,7 @@ test('supports the temporary HTTP Speech API transport with mocked fetch', async
   assert.equal(request.options.headers.Authorization, 'Bearer test-key');
   assert.equal(request.body.model, 'gpt-4o-mini-tts');
   assert.equal(request.body.response_format, 'wav');
+  assert.match(request.body.instructions, /Brazilian Portuguese/);
   assert.equal(result.sampleRate, 24000);
   assert.equal(result.pcm.length, 6);
 });
@@ -197,6 +204,7 @@ test('streams Speech API PCM as chunked 8 kHz WAV and preserves split samples', 
     model: 'gpt-4o-mini-tts',
     voice: 'marin',
     text: 'Texto de teste.',
+    language: 'pt-BR',
     response,
     onFirstAudio: (value) => { firstAudioMs = value; },
     fetchImpl: async (url, options) => {
@@ -209,6 +217,7 @@ test('streams Speech API PCM as chunked 8 kHz WAV and preserves split samples', 
   assert.match(request.url, /\/audio\/speech$/);
   assert.equal(request.body.response_format, 'pcm');
   assert.equal(request.body.stream_format, 'audio');
+  assert.match(request.body.instructions, /Brazilian Portuguese/);
   assert.equal(headers['content-type'], 'audio/wav');
   assert.equal(headers['content-length'], undefined);
   assert.equal(wav.sampleRate, 8000);
