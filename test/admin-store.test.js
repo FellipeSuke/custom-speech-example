@@ -16,6 +16,7 @@ test('persists speech configuration and stores only hashed Cognigy tokens', () =
     assert.equal(verifyPassword('correct horse battery staple', admin.password_hash), true);
     assert.equal(verifyPassword('wrong password', admin.password_hash), false);
     const created = store.createSpeechToken('test');
+    assert.equal(created.id, 1);
     assert.match(created.token, /^cgv_/);
     assert.equal(store.validateSpeechToken(created.token), true);
     assert.equal(store.validateSpeechToken('cgv_invalid'), false);
