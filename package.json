@@ -8,7 +8,8 @@
     "jslint": "eslint app.js lib",
     "start": "node app.js",
     "build": "./build_stubs.sh",
-    "admin:hash": "node scripts/hash-admin-password.js"
+    "admin:hash": "node scripts/hash-admin-password.js",
+    "admin:set-password": "node scripts/set-admin-password.js"
   },
   "author": "Dave Horton",
   "license": "MIT",
