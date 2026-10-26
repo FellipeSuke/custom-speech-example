@@ -7,4 +7,10 @@ services:
       - .env.local
     environment:
       HTTP_PORT: 3000
+      ADMIN_DB_PATH: /data/speech-adapter.sqlite
+    volumes:
+      - speech-adapter-data:/data
     restart: unless-stopped
+
+volumes:
+  speech-adapter-data:

@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('node:crypto');
 const dns = require('node:dns');
 const Websocket = require('ws');
+const adminRoutes = require('./lib/admin/routes');
 dns.setDefaultResultOrder('ipv4first');
 const opts = Object.assign({level: process.env.LOGLEVEL || 'info'});
 const logger = require('pino')(opts);
@@ -10,26 +11,34 @@ const MAX_COGNIGY_WS_MESSAGE_BYTES = 256 * 1024;
 
 const getExpectedApiKey = () => process.env.COGNIGY_SPEECH_TOKEN || process.env.API_KEY;
 
-const isValidApiKey = (hdr, apiKey = getExpectedApiKey()) => {
-  if (typeof hdr !== 'string' || typeof apiKey !== 'string' || !apiKey) return false;
+const getBearerValue = (hdr) => {
+  if (typeof hdr !== 'string') return null;
   const match = /^Bearer\s+(.+)$/i.exec(hdr.trim());
-  if (!match || !match[1].trim()) return false;
-  const actual = Buffer.from(match[1].trim());
+  return match?.[1]?.trim() || null;
+};
+
+const isValidApiKey = (hdr, apiKey = getExpectedApiKey()) => {
+  if (typeof apiKey !== 'string' || !apiKey) return false;
+  const value = getBearerValue(hdr);
+  if (!value) return false;
+  const actual = Buffer.from(value);
   const expected = Buffer.from(apiKey);
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 };
 
+const isValidSpeechAuth = (hdr, store) => isValidApiKey(hdr) || Boolean(store?.validateSpeechToken(getBearerValue(hdr)));
+
 const verifyApiKey = (req, res, next) => {
-  if (!isValidApiKey(req.headers.authorization)) {
+  if (!isValidSpeechAuth(req.headers.authorization, req.app.locals.adminStore)) {
     return res.status(403).json({ message: 'Forbidden' });
   }
   next();
 };
 
-const createApp = () => {
+const createApp = ({adminStore = process.env.ADMIN_DB_PATH ? new (require('./lib/admin/store').AdminStore)() : null} = {}) => {
   const app = express();
   app.disable('x-powered-by');
-  app.locals = {...app.locals, logger};
+  app.locals = {...app.locals, logger, adminStore, getRuntimeConfig: () => adminStore?.getSettings() || {}};
 
   app.get('/healthz', (req, res) => res.json({
     status: 'ok',
@@ -39,6 +48,7 @@ const createApp = () => {
 
   app.use(express.urlencoded({ extended: true, limit: process.env.HTTP_BODY_LIMIT || '128kb' }));
   app.use(express.json({ limit: process.env.HTTP_BODY_LIMIT || '128kb' }));
+  app.use('/admin', adminRoutes);
   app.use('/synthesize', verifyApiKey, routes);
   app.use((err, req, res, next) => {
     logger.error({err: err.message}, 'request failed');
@@ -71,12 +81,12 @@ const createServer = ({app = createApp(), port = process.env.HTTP_PORT || 3000} 
       return socket.write('HTTP/1.1 404 Not Found\r\n\r\n', () => socket.destroy());
     }
 
-    if (!isValidApiKey(request.headers.authorization)) {
+    if (!isValidSpeechAuth(request.headers.authorization, app.locals.adminStore)) {
       return socket.write('HTTP/1.1 403 Forbidden\r\n\r\n', () => socket.destroy());
     }
 
     transcribeWsServer.handleUpgrade(request, socket, head, (ws) => {
-      transcribeWsServer.emit('connection', ws, request.url);
+      transcribeWsServer.emit('connection', ws, request.url, app.locals.getRuntimeConfig());
     });
   });
 

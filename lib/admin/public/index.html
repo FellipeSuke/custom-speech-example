@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Speech Adapter Admin</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #10141b; color: #e9eef5; }
+    body { max-width: 980px; margin: 0 auto; padding: 24px; }
+    section { background: #18202b; border: 1px solid #2c3948; border-radius: 10px; padding: 18px; margin: 14px 0; }
+    label { display: block; margin: 10px 0 5px; color: #b8c4d3; }
+    input, select, button { box-sizing: border-box; border: 1px solid #45566b; border-radius: 6px; padding: 9px; background: #0f151d; color: inherit; }
+    input, select { width: 100%; }
+    button { cursor: pointer; background: #235b91; margin-top: 12px; }
+    button.danger { background: #8a3030; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #0d1117; padding: 12px; border-radius: 6px; }
+    .muted { color: #99a7b8; } .hidden { display: none; } .token { color: #8ee7a8; }
+  </style>
+</head>
+<body>
+  <h1>Speech Adapter</h1>
+  <p class="muted">Painel administrativo local — não compartilhe tokens exibidos nesta tela.</p>
+  <section id="loginCard">
+    <h2>Login</h2>
+    <form id="loginForm"><label>Usuário<input name="username" autocomplete="username" required></label><label>Senha<input name="password" type="password" autocomplete="current-password" required></label><button>Entrar</button></form>
+  </section>
+  <main id="panel" class="hidden">
+    <button id="logout">Sair</button>
+    <section><h2>Configuração ativa</h2><form id="configForm"><div class="grid"><label>TTS<select name="tts_model"></select></label><label>Transporte TTS<select name="tts_transport"><option value="realtime">Realtime</option><option value="audio_speech">Audio Speech</option></select></label><label>Reasoning<select name="tts_reasoning_effort"><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label><label>Voz<select name="tts_voice"></select></label><label>STT<select name="stt_model"></select></label></div><button>Salvar configuração</button></form><pre id="configResult"></pre></section>
+    <section><h2>Teste TTS</h2><form id="ttsForm"><label>Texto sintético<textarea name="text" rows="3" maxlength="500" style="width:100%;background:#0f151d;color:inherit;border:1px solid #45566b;border-radius:6px;padding:9px">Olá. Este é um teste sintético do adaptador de voz.</textarea></label><button>Executar teste</button></form><pre id="ttsResult"></pre></section>
+    <section><h2>Teste STT</h2><p class="muted">Gera áudio sintético pelo TTS e envia somente esse áudio ao STT. Nenhum microfone ou áudio de cliente é usado.</p><button id="sttTest">Executar teste STT</button><pre id="sttResult"></pre></section>
+    <section><h2>Tokens Cognigy</h2><form id="tokenForm"><label>Descrição<input name="label" value="Cognigy teste"></label><button>Gerar token</button></form><pre id="newToken" class="token"></pre><div id="tokens"></div></section>
+  </main>
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    const api = async (url, options = {}) => { const response = await fetch(url, {headers: {'Content-Type': 'application/json', ...(options.headers || {})}, ...options}); const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body.error || 'Falha na operação'); return body; };
+    const show = (id, value) => { $(id).textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2); };
+    const load = async () => { const data = await api('/admin/api/config'); const form = $('#configForm'); form.tts_model.innerHTML = data.ttsOptions.map((item) => `<option value="${item.model}" data-transport="${item.transport}">${item.model}</option>`).join(''); form.tts_voice.innerHTML = data.voices.map((voice) => `<option>${voice}</option>`).join(''); form.stt_model.innerHTML = data.sttModels.map((model) => `<option>${model}</option>`).join(''); Object.entries(data.settings).forEach(([key, value]) => { if (form[key]) form[key].value = value; }); form.tts_model.onchange = () => { const option = form.tts_model.selectedOptions[0]; if (option) form.tts_transport.value = option.dataset.transport; }; show('#configResult', data.settings); await tokens(); };
+    const tokens = async () => { const data = await api('/admin/api/tokens'); $('#tokens').innerHTML = data.tokens.map((token) => `<p><strong>${token.prefix}</strong> — ${token.label} — ${token.revokedAt ? 'revogado' : 'ativo'} ${token.revokedAt ? '' : `<button class="danger" data-revoke="${token.id}">Revogar</button>`}</p>`).join('') || '<p class="muted">Nenhum token gerenciado.</p>'; document.querySelectorAll('[data-revoke]').forEach((button) => button.onclick = async () => { await api(`/admin/api/tokens/${button.dataset.revoke}/revoke`, {method: 'POST'}); await tokens(); }); };
+    $('#loginForm').onsubmit = async (event) => { event.preventDefault(); try { await api('/admin/api/login', {method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(event.target)))}); $('#loginCard').classList.add('hidden'); $('#panel').classList.remove('hidden'); await load(); } catch (error) { alert(error.message); } };
+    $('#logout').onclick = async () => { await api('/admin/api/logout', {method: 'POST'}); location.reload(); };
+    $('#configForm').onsubmit = async (event) => { event.preventDefault(); try { const data = await api('/admin/api/config', {method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(event.target)))}); show('#configResult', data.settings); alert('Configuração salva.'); } catch (error) { alert(error.message); } };
+    $('#ttsForm').onsubmit = async (event) => { event.preventDefault(); show('#ttsResult', 'Executando...'); try { show('#ttsResult', await api('/admin/api/tests/tts', {method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(event.target)))})); } catch (error) { show('#ttsResult', error.message); } };
+    $('#sttTest').onclick = async () => { show('#sttResult', 'Executando...'); try { show('#sttResult', await api('/admin/api/tests/stt', {method: 'POST'})); } catch (error) { show('#sttResult', error.message); } };
+    $('#tokenForm').onsubmit = async (event) => { event.preventDefault(); try { const data = await api('/admin/api/tokens', {method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(event.target)))}); show('#newToken', `Copie agora — ele não será mostrado novamente:\n${data.token}`); await tokens(); } catch (error) { alert(error.message); } };
+  </script>
+</body>
+</html>
