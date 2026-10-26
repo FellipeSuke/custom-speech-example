@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const dns = require('node:dns');
 const Websocket = require('ws');
 const adminRoutes = require('./lib/admin/routes');
+const {readOpenAiApiKey} = require('./lib/openai-config');
 dns.setDefaultResultOrder('ipv4first');
 const opts = Object.assign({level: process.env.LOGLEVEL || 'info'});
 const logger = require('pino')(opts);
@@ -42,7 +43,7 @@ const createApp = ({adminStore = process.env.ADMIN_DB_PATH ? new (require('./lib
 
   app.get('/healthz', (req, res) => res.json({
     status: 'ok',
-    openaiConfigured: Boolean(process.env.OPENAI_API_KEY),
+    openaiConfigured: Boolean(readOpenAiApiKey()),
     openaiConnectivity: 'not_checked'
   }));
 

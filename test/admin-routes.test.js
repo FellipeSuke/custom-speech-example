@@ -35,6 +35,7 @@ before(() => {
   process.env.ADMIN_COOKIE_SECURE = 'false';
   process.env.ADMIN_PASSWORD_HASH = hashPassword('test-password');
   process.env.ADMIN_USERNAME = 'admin';
+  process.env.OPENAI_API_KEY_FILE = path.join(directory, 'openai-api-key');
   store = new AdminStore(path.join(directory, 'adapter.sqlite'));
   server = require('../app').createServer({app: createApp({adminStore: store}), port: 0});
 });
@@ -54,6 +55,13 @@ test('admin portal authenticates and manages runtime configuration and tokens', 
   assert.equal(login.statusCode, 200);
   const cookie = login.headers['set-cookie'][0].split(';')[0];
   assert.equal((await request('GET', '/admin/api/config', undefined, cookie)).statusCode, 200);
+  const initialConfig = JSON.parse((await request('GET', '/admin/api/config', undefined, cookie)).body);
+  assert.ok(initialConfig.endpoints.some((endpoint) => endpoint.url.endsWith('/synthesize/openai')));
+  assert.equal(initialConfig.openai.configured, false);
+  const openaiKey = await request('POST', '/admin/api/openai-key', {apiKey: 'sk-test-server-side-key-1234567890'}, cookie);
+  assert.equal(openaiKey.statusCode, 200);
+  assert.doesNotMatch(openaiKey.body, /sk-test-server-side-key/);
+  assert.equal(JSON.parse(openaiKey.body).openai.source, 'managed_file');
   const config = await request('PUT', '/admin/api/config', {stt_model: 'gpt-4o-transcribe'}, cookie);
   assert.equal(config.statusCode, 200);
   assert.equal(JSON.parse(config.body).settings.stt_model, 'gpt-4o-transcribe');

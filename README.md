@@ -93,6 +93,11 @@ some depending on the environment variables supplied.
   configured. It uses SQLite in the configured Docker volume, supports runtime
   TTS/STT model selection, token creation/revocation, and synthetic TTS/STT
   probes. Configure `ADMIN_USERNAME` and a random `ADMIN_SESSION_SECRET`.
+  After login, the portal shows the Cognigy and upstream OpenAI endpoints and
+  accepts an OpenAI API key. The key is stored only in the server-side key file
+  (`OPENAI_API_KEY_FILE`, defaulting beside the SQLite file), with mode 0600;
+  it is never returned by the API, stored in SQLite, or logged. A managed key
+  file takes precedence over `OPENAI_API_KEY`.
   For a running Docker deployment, set the initial password without copying a
   hash through `docker exec -it <container> npm run admin:set-password`; the
   command stores only the derived password hash in SQLite. Alternatively,
@@ -158,6 +163,15 @@ curl -X POST http://localhost:3000/synthesize/openai \
 With Docker Compose, the default host port is `8086` and the container listens
 on `3000`. Set `ADAPTER_BIND_ADDRESS` and `ADAPTER_PORT` in `.env.local` if
 that port is later occupied.
+
+Set `PUBLIC_BASE_URL=https://sukeserver.ddns.net:8086` when the adapter is
+behind the existing reverse proxy. The admin portal then presents copyable
+TTS and STT URLs for future Cognigy projects, including:
+
+```text
+https://sukeserver.ddns.net:8086/synthesize/openai
+wss://sukeserver.ddns.net:8086/transcribe/openai
+```
 
 The Compose deployment mounts the `speech-adapter-data` volume at `/data` for
 the administrator SQLite database. Keep `/admin` restricted to the internal
