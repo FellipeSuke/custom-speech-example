@@ -84,10 +84,10 @@ class LiveFakeWebSocket extends FakeWebSocket {
     const event = JSON.parse(payload);
     this.sent.push(event);
     if (event.type === 'session.start') {
-      setImmediate(() => {
-        this.emit('message', Buffer.from(JSON.stringify({type: 'session.started'})));
-        this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_audio.delta', delta: Buffer.alloc(12).toString('base64')})));
-      });
+      setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.started'}))));
+    }
+    if (event.type === 'session.commentary.append') {
+      setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_audio.delta', delta: Buffer.alloc(12).toString('base64')}))));
     }
     if (event.type === 'session.close') {
       setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.closed'}))));
@@ -149,6 +149,9 @@ test('collects mocked GPT-Live audio with the Brazilian bossa voice', async () =
   assert.equal(start.session.audio.format.rate, 24000);
   assert.match(start.session.input[0].content[0].text, /Brazilian Portuguese/);
   assert.equal(start.session.input[1].content[0].text, 'Olá, este é um teste sintético.');
+  const speechCommand = LiveFakeWebSocket.lastInstance.sent.find((event) => event.type === 'session.commentary.append');
+  assert.equal(speechCommand.delegation_id, null);
+  assert.match(speechCommand.content, /exactly as written/);
 });
 
 test('streams mocked Realtime audio as chunked 8 kHz WAV', async () => {
