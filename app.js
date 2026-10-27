@@ -91,9 +91,35 @@ const createServer = ({app = createApp(), port = process.env.HTTP_PORT || 3000} 
     });
   });
 
+  server.closeSpeechSockets = () => {
+    for (const socket of transcribeWsServer.clients) socket.close(1012, 'Service restart');
+    const forceCloseTimer = setTimeout(() => {
+      for (const socket of transcribeWsServer.clients) socket.terminate();
+    }, 15000);
+    forceCloseTimer.unref();
+  };
+
   return server;
 };
 
-if (require.main === module) createServer();
+if (require.main === module) {
+  const server = createServer();
+  let shuttingDown = false;
+  const shutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info({signal}, 'Speech adapter shutting down');
+    server.closeSpeechSockets();
+    server.close((error) => {
+      if (error) {
+        logger.error({error: error.message}, 'Speech adapter shutdown failed');
+        process.exitCode = 1;
+      }
+    });
+    setTimeout(() => server.closeAllConnections?.(), 25000).unref();
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
+}
 
 module.exports = {createApp, createServer, isValidApiKey};

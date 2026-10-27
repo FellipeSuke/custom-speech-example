@@ -53,6 +53,7 @@ after(async () => {
 test('admin portal authenticates and manages runtime configuration and tokens', async () => {
   const login = await request('POST', '/admin/api/login', {username: 'admin', password: 'test-password'});
   assert.equal(login.statusCode, 200);
+  assert.equal(login.headers['cache-control'], 'no-store');
   const cookie = login.headers['set-cookie'][0].split(';')[0];
   assert.equal((await request('GET', '/admin/api/config', undefined, cookie)).statusCode, 200);
   const initialConfig = JSON.parse((await request('GET', '/admin/api/config', undefined, cookie)).body);

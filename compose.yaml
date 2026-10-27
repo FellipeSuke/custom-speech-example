@@ -10,6 +10,7 @@ services:
       ADMIN_DB_PATH: /data/speech-adapter.sqlite
     volumes:
       - speech-adapter-data:/data
+    stop_grace_period: 30s
     restart: unless-stopped
 
 volumes:
