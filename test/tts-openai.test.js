@@ -87,7 +87,10 @@ class LiveFakeWebSocket extends FakeWebSocket {
       setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.started'}))));
     }
     if (event.type === 'session.commentary.append') {
-      setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_audio.delta', delta: Buffer.alloc(12).toString('base64')}))));
+      setImmediate(() => {
+        this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_transcript.delta', delta: 'Olá, este é um teste sintético.'})));
+        this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_audio.delta', delta: Buffer.alloc(12).toString('base64')})));
+      });
     }
     if (event.type === 'session.close') {
       setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.closed'}))));
