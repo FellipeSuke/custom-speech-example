@@ -11,7 +11,9 @@ const {
   synthesizeSpeechHttp,
   streamSpeechHttp,
   streamRealtimeTts,
-  streamLiveTts
+  streamLiveTts,
+  prewarmLiveTtsConnection,
+  closeWarmLiveTtsConnection
 } = require('../lib/tts/openai');
 const {createWavPcm16Mono, parseWavPcm16Mono} = require('../lib/audio/pcm');
 
@@ -118,6 +120,18 @@ class StreamingLiveFakeWebSocket extends LiveFakeWebSocket {
     if (event.type === 'session.close') {
       setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.closed'}))));
     }
+  }
+}
+
+class UnexpectedPrefixLiveFakeWebSocket extends StreamingLiveFakeWebSocket {
+  send(payload) {
+    const event = JSON.parse(payload);
+    if (event.type !== 'session.instructions.append') return super.send(payload);
+    this.sent.push(event);
+    setImmediate(() => {
+      this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_transcript.delta', delta: 'Unexpected extra words. Olá, este é um teste sintético de voz em português brasileiro.'})));
+      this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_audio.delta', delta: Buffer.alloc(12).toString('base64')})));
+    });
   }
 }
 
@@ -238,6 +252,7 @@ test('streams mocked GPT-Live audio to Cognigy as chunked 8 kHz WAV', async () =
   assert.equal(wav.sampleRate, 8000);
   assert.deepEqual(Array.from({length: 3}, (_, index) => wav.pcm.readInt16LE(index * 2)), [1667, -1667, 4333]);
   assert.equal(result.bytes, 6);
+  assert.equal(result.transcriptMatchesTargetExactly, true);
   assert.ok(result.firstAudioMs >= 0);
   assert.ok(result.transcriptMatchedMs >= 0);
   assert.ok(result.lastAudioChunkMs >= result.transcriptMatchedMs);
@@ -246,6 +261,90 @@ test('streams mocked GPT-Live audio to Cognigy as chunked 8 kHz WAV', async () =
   assert.ok(written.length >= 2);
   assert.ok(firstAudioMs >= 0);
   assert.equal(ended, true);
+});
+
+test('reuses a preconnected idle GPT-Live websocket for the next speech request', async () => {
+  closeWarmLiveTtsConnection();
+  await prewarmLiveTtsConnection({apiKey: 'test-key', WebSocketImpl: LiveFakeWebSocket});
+  const socket = LiveFakeWebSocket.lastInstance;
+  assert.equal(socket.readyState, LiveFakeWebSocket.OPEN);
+  assert.equal(socket.options.perMessageDeflate, false);
+
+  const response = {
+    writableEnded: false,
+    setHeader() {},
+    removeHeader() {},
+    flushHeaders() {},
+    write() { return true; },
+    end() { this.writableEnded = true; },
+    destroy(error) { throw error; }
+  };
+  const streamed = await streamLiveTts({
+    apiKey: 'test-key',
+    voice: 'bossa',
+    text: 'Olá, este é um teste sintético.',
+    language: 'pt-BR',
+    response,
+    WebSocketImpl: LiveFakeWebSocket
+  });
+
+  assert.equal(LiveFakeWebSocket.lastInstance, socket);
+  assert.equal(streamed.socketWasWarm, true);
+  assert.equal(streamed.socketOpenMs, 0);
+  assert.equal(streamed.transcriptMatchesTargetExactly, true);
+  closeWarmLiveTtsConnection();
+});
+
+test('does not reuse a preconnected GPT-Live socket after the API key changes', async () => {
+  closeWarmLiveTtsConnection();
+  await prewarmLiveTtsConnection({apiKey: 'first-test-key', WebSocketImpl: LiveFakeWebSocket});
+  const oldSocket = LiveFakeWebSocket.lastInstance;
+  const response = {
+    writableEnded: false,
+    setHeader() {},
+    removeHeader() {},
+    flushHeaders() {},
+    write() { return true; },
+    end() { this.writableEnded = true; },
+    destroy(error) { throw error; }
+  };
+  const streamed = await streamLiveTts({
+    apiKey: 'rotated-test-key',
+    voice: 'bossa',
+    text: 'Olá, este é um teste sintético.',
+    language: 'pt-BR',
+    response,
+    WebSocketImpl: LiveFakeWebSocket,
+    closeQuietMs: 5
+  });
+  assert.notEqual(LiveFakeWebSocket.lastInstance, oldSocket);
+  assert.equal(streamed.socketWasWarm, false);
+  closeWarmLiveTtsConnection();
+});
+
+test('detects text that surrounds the requested GPT-Live transcript without logging it', async () => {
+  const response = {
+    writableEnded: false,
+    setHeader() {},
+    removeHeader() {},
+    flushHeaders() {},
+    write() { return true; },
+    end() { this.writableEnded = true; },
+    destroy(error) { throw error; }
+  };
+  const streamed = await streamLiveTts({
+    apiKey: 'test-key',
+    voice: 'bossa',
+    text: 'Olá, este é um teste sintético de voz em português brasileiro.',
+    language: 'pt-BR',
+    response,
+    WebSocketImpl: UnexpectedPrefixLiveFakeWebSocket,
+    closeQuietMs: 5
+  });
+  assert.equal(streamed.transcriptContainsTarget, true);
+  assert.equal(streamed.transcriptMatchesTargetExactly, false);
+  assert.equal(streamed.transcriptPrefixMatchesTarget, false);
+  assert.equal('transcript' in streamed, false);
 });
 
 test('bounds the GPT-Live audio tail after the transcript matches', async () => {

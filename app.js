@@ -4,6 +4,7 @@ const dns = require('node:dns');
 const Websocket = require('ws');
 const adminRoutes = require('./lib/admin/routes');
 const {readOpenAiApiKey} = require('./lib/openai-config');
+const {prewarmLiveTtsConnection, closeWarmLiveTtsConnection} = require('./lib/tts/openai');
 dns.setDefaultResultOrder('ipv4first');
 const opts = Object.assign({level: process.env.LOGLEVEL || 'info'});
 const logger = require('pino')(opts);
@@ -103,12 +104,16 @@ const createServer = ({app = createApp(), port = process.env.HTTP_PORT || 3000} 
 };
 
 if (require.main === module) {
-  const server = createServer();
+  const app = createApp();
+  const server = createServer({app});
+  const settings = app.locals.getRuntimeConfig();
+  if (process.env.TTS_STREAMING_ENABLED === 'true' && settings.tts_transport === 'gpt_live' && settings.tts_model === 'gpt-live-1') prewarmLiveTtsConnection().catch(() => {});
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({signal}, 'Speech adapter shutting down');
+    closeWarmLiveTtsConnection();
     server.closeSpeechSockets();
     server.close((error) => {
       if (error) {
