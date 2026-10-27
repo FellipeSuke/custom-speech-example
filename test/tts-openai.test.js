@@ -10,7 +10,8 @@ const {
   REALTIME_MODELS,
   synthesizeSpeechHttp,
   streamSpeechHttp,
-  streamRealtimeTts
+  streamRealtimeTts,
+  streamLiveTts
 } = require('../lib/tts/openai');
 const {createWavPcm16Mono, parseWavPcm16Mono} = require('../lib/audio/pcm');
 
@@ -98,6 +99,28 @@ class LiveFakeWebSocket extends FakeWebSocket {
   }
 }
 
+class StreamingLiveFakeWebSocket extends LiveFakeWebSocket {
+  send(payload) {
+    const event = JSON.parse(payload);
+    this.sent.push(event);
+    if (event.type === 'session.start') {
+      setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.started'}))));
+    }
+    if (event.type === 'session.commentary.append') {
+      const audio = Buffer.alloc(18);
+      [2000, -2000, 5000, -5000, 9000, -9000, 11000, -11000, 13000].forEach((sample, index) => audio.writeInt16LE(sample, index * 2));
+      setImmediate(() => {
+        this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_transcript.delta', delta: 'Olá, este é um teste sintético de voz em português brasileiro.'})));
+        this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_audio.delta', delta: audio.subarray(0, 5).toString('base64')})));
+        this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_audio.delta', delta: audio.subarray(5).toString('base64')})));
+      });
+    }
+    if (event.type === 'session.close') {
+      setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.closed'}))));
+    }
+  }
+}
+
 test('builds the current Realtime TTS events', () => {
   const session = buildSessionUpdate('gpt-realtime-2.1-mini', 'marin');
   assert.equal(session.type, 'session.update');
@@ -157,6 +180,40 @@ test('collects mocked GPT-Live audio with the Brazilian bossa voice', async () =
   assert.match(speechCommand.content, /exactly as written/);
   const silence = LiveFakeWebSocket.lastInstance.sent.find((event) => event.type === 'session.input_audio.append');
   assert.equal(Buffer.from(silence.audio, 'base64').length, 48000);
+});
+
+test('streams mocked GPT-Live audio to Cognigy as chunked 8 kHz WAV', async () => {
+  const written = [];
+  const headers = {};
+  let ended = false;
+  let firstAudioMs;
+  const response = {
+    writableEnded: false,
+    setHeader(name, value) { headers[name.toLowerCase()] = value; },
+    removeHeader(name) { delete headers[name.toLowerCase()]; },
+    flushHeaders() {},
+    write(chunk) { written.push(Buffer.from(chunk)); return true; },
+    end() { ended = true; this.writableEnded = true; },
+    destroy(error) { throw error; }
+  };
+  const result = await streamLiveTts({
+    apiKey: 'test-key',
+    voice: 'bossa',
+    text: 'Olá, este é um teste sintético de voz em português brasileiro.',
+    language: 'pt-BR',
+    response,
+    WebSocketImpl: StreamingLiveFakeWebSocket,
+    onFirstAudio: (value) => { firstAudioMs = value; }
+  });
+  const wav = parseWavPcm16Mono(Buffer.concat(written));
+  assert.equal(headers['content-type'], 'audio/wav');
+  assert.equal(headers['content-length'], undefined);
+  assert.equal(wav.sampleRate, 8000);
+  assert.deepEqual(Array.from({length: 3}, (_, index) => wav.pcm.readInt16LE(index * 2)), [1667, -1667, 4333]);
+  assert.equal(result.bytes, 6);
+  assert.ok(written.length >= 2);
+  assert.ok(firstAudioMs >= 0);
+  assert.equal(ended, true);
 });
 
 test('streams mocked Realtime audio as chunked 8 kHz WAV', async () => {

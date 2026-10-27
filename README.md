@@ -81,12 +81,16 @@ some depending on the environment variables supplied.
   is available for integrations that intentionally trade latency for reasoning.
 - For the temporary project-compatible mode, set
   `OPENAI_TTS_TRANSPORT=audio_speech` and `OPENAI_TTS_MODEL=gpt-4o-mini-tts`.
-- The admin portal also exposes experimental one-shot GPT-Live TTS using
-  `gpt-live-1` with the Brazilian Portuguese voices `bossa` (feminine) and
-  `tempo` (masculine). The test uses a short-lived Live WebSocket session and
-  buffers its audio before returning it to Cognigy; it is not a drop-in
-  streaming TTS endpoint. Use the portal's synthetic TTS test to listen to an
-  8 kHz preview before selecting this transport for a Cognigy test call.
+- The admin portal also exposes experimental GPT-Live TTS using `gpt-live-1`
+  with the Brazilian Portuguese voices `bossa` (feminine) and `tempo`
+  (masculine). The synthetic portal test returns an 8 kHz preview. When
+  `TTS_STREAMING_ENABLED=true` and Cognigy's **text-to-speech streaming** option
+  is enabled on the speech credential, `/synthesize/openai` forwards GPT-Live
+  audio deltas as chunked 8 kHz WAV so Cognigy can begin playback before the
+  full utterance is complete. GPT-Live has no explicit audio-done event; the
+  adapter uses transcript matching, an inactivity timeout, and a bounded
+  audio duration to close each one-shot session. This remains experimental:
+  compare perceived latency and wording with Realtime before production use.
 - For lower time-to-first-audio with Cognigy streaming TTS, also set
   `TTS_STREAMING_ENABLED=true`. With Realtime this forwards audio deltas as
   they arrive; with `audio_speech` it uses the Speech API's chunked PCM

@@ -59,6 +59,8 @@ test('admin portal authenticates and manages runtime configuration and tokens', 
   const initialConfig = JSON.parse((await request('GET', '/admin/api/config', undefined, cookie)).body);
   assert.ok(initialConfig.endpoints.some((endpoint) => endpoint.url.endsWith('/synthesize/openai')));
   assert.ok(initialConfig.ttsOptions.some((option) => option.model === 'gpt-live-1' && option.transport === 'gpt_live'));
+  assert.ok(initialConfig.voices.includes('bossa'));
+  assert.ok(initialConfig.voices.includes('tempo'));
   assert.equal(initialConfig.openai.configured, false);
   const openaiKey = await request('POST', '/admin/api/openai-key', {apiKey: 'sk-test-server-side-key-1234567890'}, cookie);
   assert.equal(openaiKey.statusCode, 200);
@@ -72,6 +74,9 @@ test('admin portal authenticates and manages runtime configuration and tokens', 
   assert.equal(JSON.parse(liveConfig.body).settings.tts_voice, 'bossa');
   const invalidLiveConfig = await request('PUT', '/admin/api/config', {tts_model: 'gpt-live-1', tts_transport: 'gpt_live', tts_voice: 'marin'}, cookie);
   assert.equal(invalidLiveConfig.statusCode, 400);
+  const tempoConfig = await request('PUT', '/admin/api/config', {tts_model: 'gpt-live-1', tts_transport: 'gpt_live', tts_voice: 'tempo'}, cookie);
+  assert.equal(tempoConfig.statusCode, 200);
+  assert.equal(JSON.parse(tempoConfig.body).settings.tts_voice, 'tempo');
   const token = await request('POST', '/admin/api/tokens', {label: 'automated test'}, cookie);
   assert.equal(token.statusCode, 201);
   assert.equal(store.validateSpeechToken(JSON.parse(token.body).token), true);
