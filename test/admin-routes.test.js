@@ -6,7 +6,7 @@ const path = require('node:path');
 const {after, before, test} = require('node:test');
 const {createApp} = require('../app');
 const {AdminStore, hashPassword} = require('../lib/admin/store');
-const {runSyntheticSttTest} = require('../lib/admin/routes');
+const {createGptLiveSession, GPT_LIVE_GREETING, runSyntheticSttTest} = require('../lib/admin/routes');
 const {EventEmitter} = require('node:events');
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'speech-admin-routes-'));
@@ -56,6 +56,9 @@ test('admin portal authenticates and manages runtime configuration and tokens', 
   assert.equal(login.headers['cache-control'], 'no-store');
   const cookie = login.headers['set-cookie'][0].split(';')[0];
   assert.equal((await request('GET', '/admin/api/config', undefined, cookie)).statusCode, 200);
+  assert.equal((await request('POST', '/admin/api/tests/gpt-live/session', {}, undefined)).statusCode, 401);
+  const invalidLiveTest = await request('POST', '/admin/api/tests/gpt-live/session', {sdp: 'offer', instructions: 'teste', voice: 'marin'}, cookie);
+  assert.equal(invalidLiveTest.statusCode, 400);
   const initialConfig = JSON.parse((await request('GET', '/admin/api/config', undefined, cookie)).body);
   assert.ok(initialConfig.endpoints.some((endpoint) => endpoint.url.endsWith('/synthesize/openai')));
   assert.ok(initialConfig.ttsOptions.some((option) => option.model === 'gpt-live-1' && option.transport === 'gpt_live'));
@@ -80,6 +83,45 @@ test('admin portal authenticates and manages runtime configuration and tokens', 
   const token = await request('POST', '/admin/api/tokens', {label: 'automated test'}, cookie);
   assert.equal(token.statusCode, 201);
   assert.equal(store.validateSpeechToken(JSON.parse(token.body).token), true);
+});
+
+test('direct GPT-Live test creates a WebRTC session with server-side credentials and initial instructions', async () => {
+  let requestUrl;
+  let requestOptions;
+  const result = await createGptLiveSession({
+    apiKey: 'server-only-test-key',
+    sdp: 'synthetic-sdp-offer',
+    instructions: 'Speak Brazilian Portuguese and wait for the caller.',
+    voice: 'bossa',
+    speakFirst: true,
+    fetchImpl: async (url, options) => {
+      requestUrl = url;
+      requestOptions = options;
+      return {ok: true, json: async () => ({session: {id: 'live_test'}, transport: {type: 'webrtc', sdp: 'synthetic-sdp-answer'}})};
+    }
+  });
+  assert.match(requestUrl, /\/live\/sessions$/);
+  assert.equal(requestOptions.headers.Authorization, 'Bearer server-only-test-key');
+  const payload = JSON.parse(requestOptions.body);
+  assert.equal(payload.session.model, 'gpt-live-1');
+  assert.equal(payload.session.instructions, 'Speak Brazilian Portuguese and wait for the caller.');
+  assert.equal(payload.session.audio.output.voice, 'bossa');
+  assert.equal(payload.session.store, false);
+  assert.equal(payload.session.input[0].role, 'developer');
+  assert.equal(payload.session.input[0].content[0].text, GPT_LIVE_GREETING);
+  assert.equal(payload.transport.type, 'webrtc');
+  assert.equal(result.sdp, 'synthetic-sdp-answer');
+  assert.doesNotMatch(JSON.stringify(result), /server-only-test-key|live_test/);
+
+  const quietResult = await createGptLiveSession({
+    apiKey: 'server-only-test-key', sdp: 'synthetic-sdp-offer', instructions: 'Wait for caller.', voice: 'tempo',
+    fetchImpl: async (_url, options) => ({ok: true, json: async () => {
+      const quietPayload = JSON.parse(options.body);
+      assert.equal(Object.hasOwn(quietPayload.session, 'input'), false);
+      return {transport: {sdp: 'synthetic-sdp-answer'}};
+    }})
+  });
+  assert.equal(quietResult.sdp, 'synthetic-sdp-answer');
 });
 
 test('synthetic STT probe uses mocked WebSocket events offline', async () => {

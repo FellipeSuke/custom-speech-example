@@ -9,11 +9,12 @@
     body { max-width: 980px; margin: 0 auto; padding: 24px; }
     section { background: #18202b; border: 1px solid #2c3948; border-radius: 10px; padding: 18px; margin: 14px 0; }
     label { display: block; margin: 10px 0 5px; color: #b8c4d3; }
-    input, select, button { box-sizing: border-box; border: 1px solid #45566b; border-radius: 6px; padding: 9px; background: #0f151d; color: inherit; }
-    input, select { width: 100%; }
+    input, select, textarea, button { box-sizing: border-box; border: 1px solid #45566b; border-radius: 6px; padding: 9px; background: #0f151d; color: inherit; }
+    input, select, textarea { width: 100%; }
     button { cursor: pointer; background: #235b91; margin-top: 12px; }
     button.danger { background: #8a3030; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .transcript { min-height: 100px; max-height: 360px; overflow: auto; }
     pre { white-space: pre-wrap; word-break: break-word; background: #0d1117; padding: 12px; border-radius: 6px; }
     .muted { color: #99a7b8; } .hidden { display: none; } .token { color: #8ee7a8; }
   </style>
@@ -31,6 +32,7 @@
     <section><h2>Endpoints</h2><p class="muted">Use os endpoints Cognigy nos projetos. Os endpoints OpenAI são acessados apenas pelo servidor.</p><pre id="endpoints"></pre></section>
     <section><h2>Configuração ativa</h2><form id="configForm"><div class="grid"><label>TTS<select name="tts_model"></select></label><label>Transporte TTS<select name="tts_transport"><option value="realtime">Realtime</option><option value="gpt_live">GPT-Live (experimental)</option><option value="audio_speech">Audio Speech</option></select></label><label>Reasoning<select name="tts_reasoning_effort"><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label><label>Voz<select name="tts_voice"></select></label><label>STT<select name="stt_model"></select></label></div><p class="muted">GPT-Live: teste `bossa` (feminina) e `tempo` (masculina), ambas com influência brasileira. Para reprodução com menor latência no Cognigy, habilite o streaming TTS na credencial e mantenha o streaming ativo neste servidor. Salvar essa opção altera o serviço usado nas chamadas Cognigy.</p><button>Salvar configuração</button></form><pre id="configResult"></pre></section>
     <section><h2>Teste TTS</h2><form id="ttsForm"><label>Texto sintético<textarea name="text" rows="3" maxlength="500" style="width:100%;background:#0f151d;color:inherit;border:1px solid #45566b;border-radius:6px;padding:9px">Olá. Este é um teste sintético do adaptador de voz.</textarea></label><button>Executar teste</button></form><pre id="ttsResult"></pre><audio id="ttsPreview" controls class="hidden"></audio></section>
+    <section id="liveTest"><h2>Chamada direta GPT-Live</h2><p class="muted">Teste independente do Cognigy: o áudio do microfone vai diretamente do navegador ao GPT-Live. A chave OpenAI continua no servidor. Use uma conversa sintética e encerre pelo botão quando terminar. A criação da sessão contabiliza inicialmente 15 segundos de voz, creditados ao uso da sessão após ela iniciar.</p><div class="grid"><label>Voz<select id="liveVoice"><option value="bossa">bossa</option><option value="tempo">tempo</option></select></label></div><label for="liveInstructions">Instruções iniciais para o modelo</label><textarea id="liveInstructions" rows="5" maxlength="8000">Você conversa diretamente com uma pessoa em uma chamada de teste. Fale somente em português brasileiro. Você é a única voz de assistente nesta chamada; Cognigy e outros assistentes não participam. Não invente falas ou perguntas da pessoa. Evite backchannels. Responda de forma natural e breve. Não execute tarefas de backend.</textarea><label><input id="liveSpeakFirst" type="checkbox" style="width:auto"> Pedir ao GPT-Live para cumprimentar ao conectar</label><p class="muted">As instruções são enviadas na criação da sessão. Sem a saudação, fale primeiro e observe se o modelo aguarda sua vez. Com ela, o GPT-Live recebe instrução explícita para falar assim que conectar e depois escutar. O microfone precisa de HTTPS (este portal) ou localhost.</p><button id="liveStart">Iniciar chamada de teste</button> <button id="liveEnd" class="danger" disabled>Encerrar chamada</button><p id="liveStatus" class="muted" aria-live="polite">Aguardando início. O navegador solicitará acesso ao microfone.</p><audio id="liveAudio" controls autoplay></audio><h3>Transcrição local da sessão</h3><pre id="liveTranscript" class="transcript" aria-live="polite">As falas parciais aparecerão aqui e não serão salvas pelo servidor.</pre></section>
     <section><h2>Teste STT</h2><p class="muted">Gera áudio sintético pelo TTS e envia somente esse áudio ao STT. Nenhum microfone ou áudio de cliente é usado.</p><button id="sttTest">Executar teste STT</button><pre id="sttResult"></pre></section>
     <section><h2>Tokens Cognigy</h2><form id="tokenForm"><label>Descrição<input name="label" value="Cognigy teste"></label><button>Gerar token</button></form><pre id="newToken" class="token"></pre><div id="tokens"></div></section>
   </main>
@@ -48,6 +50,120 @@
     $('#ttsForm').onsubmit = async (event) => { event.preventDefault(); show('#ttsResult', 'Executando...'); $('#ttsPreview').classList.add('hidden'); try { const payload = {...Object.fromEntries(new FormData(event.target)), ...Object.fromEntries(new FormData($('#configForm')))}; const data = await api('/admin/api/tests/tts', {method: 'POST', body: JSON.stringify(payload)}); const {previewAudio, ...metrics} = data; show('#ttsResult', metrics); if (previewAudio) { $('#ttsPreview').src = URL.createObjectURL(new Blob([Uint8Array.from(atob(previewAudio), (char) => char.charCodeAt(0))], {type: 'audio/wav'})); $('#ttsPreview').classList.remove('hidden'); } } catch (error) { show('#ttsResult', error.message); } };
     $('#sttTest').onclick = async () => { show('#sttResult', 'Executando...'); try { show('#sttResult', await api('/admin/api/tests/stt', {method: 'POST'})); } catch (error) { show('#sttResult', error.message); } };
     $('#tokenForm').onsubmit = async (event) => { event.preventDefault(); try { const data = await api('/admin/api/tokens', {method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(event.target)))}); show('#newToken', `Copie agora — ele não será mostrado novamente:\n${data.token}`); await tokens(); } catch (error) { alert(error.message); } };
+
+    let livePeer;
+    let liveMicrophone;
+    let liveEvents;
+    let liveCloseTimeout;
+    let liveFinalized = false;
+    let liveTranscriptLine = null;
+    const liveGreetingInstruction = 'Cumprimente a pessoa agora em português brasileiro, diga brevemente que esta é uma chamada direta de teste do GPT-Live e pergunte como pode ajudar. Depois, pare de falar e escute.';
+    const liveStatus = (message) => { $('#liveStatus').textContent = message; };
+    const appendLiveTranscript = (speaker, delta) => {
+      if (!delta) return;
+      if (!liveTranscriptLine || liveTranscriptLine.dataset.speaker !== speaker) {
+        liveTranscriptLine = document.createElement('div');
+        liveTranscriptLine.dataset.speaker = speaker;
+        liveTranscriptLine.textContent = `${speaker}: `;
+        $('#liveTranscript').append(liveTranscriptLine);
+      }
+      liveTranscriptLine.append(document.createTextNode(delta));
+      $('#liveTranscript').scrollTop = $('#liveTranscript').scrollHeight;
+    };
+    const cleanupLiveCall = () => {
+      clearTimeout(liveCloseTimeout);
+      liveMicrophone?.getTracks().forEach((track) => track.stop());
+      liveMicrophone = undefined;
+      const closingEvents = liveEvents;
+      liveEvents = undefined;
+      closingEvents?.close();
+      livePeer?.close();
+      livePeer = undefined;
+      $('#liveAudio').srcObject = null;
+      $('#liveStart').disabled = false;
+      $('#liveEnd').disabled = true;
+    };
+    $('#liveStart').onclick = async () => {
+      $('#liveStart').disabled = true;
+      $('#liveEnd').disabled = true;
+      $('#liveTranscript').replaceChildren();
+      liveTranscriptLine = null;
+      liveFinalized = false;
+      liveStatus('Solicitando microfone e conectando ao GPT-Live...');
+      try {
+        const connection = new RTCPeerConnection();
+        livePeer = connection;
+        connection.addEventListener('track', (event) => {
+          $('#liveAudio').srcObject = event.streams[0] || new MediaStream([event.track]);
+          $('#liveAudio').play().catch(() => liveStatus('Conectado. Se não ouvir o modelo, pressione Play no controle de áudio.'));
+        });
+        liveMicrophone = await navigator.mediaDevices.getUserMedia({audio: true});
+        liveMicrophone.getAudioTracks().forEach((track) => connection.addTrack(track, liveMicrophone));
+        const events = connection.createDataChannel('oai-events');
+        liveEvents = events;
+        events.addEventListener('message', ({data}) => {
+          let event;
+          try { event = JSON.parse(data); } catch { return; }
+          if (event.type === 'session.started') {
+            $('#liveEnd').disabled = false;
+            if ($('#liveSpeakFirst').checked) {
+              liveStatus('Conectado; solicitei a saudação inicial. A chamada ficará aberta até você encerrar.');
+              events.send(JSON.stringify({type: 'session.commentary.append', event_id: crypto.randomUUID(), delegation_id: null, content: liveGreetingInstruction}));
+            } else {
+              liveStatus('Conectado diretamente ao GPT-Live. Fale para iniciar; a chamada permanece aberta até você encerrar.');
+            }
+          } else if (event.type === 'session.closed') {
+            liveFinalized = true;
+            liveStatus('Sessão encerrada pelo GPT-Live.');
+            cleanupLiveCall();
+          } else if (event.type === 'session.input_transcript.delta') {
+            appendLiveTranscript('Você', event.delta);
+          } else if (event.type === 'session.output_transcript.delta') {
+            appendLiveTranscript('GPT-Live', event.delta);
+          } else if (event.type === 'error') {
+            liveStatus('O GPT-Live reportou um erro durante a sessão. Consulte a conexão e tente novamente.');
+          }
+        });
+        events.addEventListener('close', () => {
+          if (liveEvents !== events || liveFinalized) return;
+          liveStatus('Conexão encerrada antes da confirmação final da sessão.');
+          cleanupLiveCall();
+        });
+        const offer = await connection.createOffer();
+        await connection.setLocalDescription(offer);
+        if (connection.iceGatheringState !== 'complete') {
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => { connection.removeEventListener('icegatheringstatechange', onIceState); reject(new Error('Tempo limite ao preparar a conexão de áudio.')); }, 15000);
+            function onIceState() {
+              if (connection.iceGatheringState !== 'complete') return;
+              clearTimeout(timeout);
+              connection.removeEventListener('icegatheringstatechange', onIceState);
+              resolve();
+            }
+            connection.addEventListener('icegatheringstatechange', onIceState);
+            onIceState();
+          });
+        }
+        const sdp = connection.localDescription?.sdp;
+        if (!sdp) throw new Error('Não foi possível preparar a oferta de áudio.');
+        const data = await api('/admin/api/tests/gpt-live/session', {method: 'POST', body: JSON.stringify({sdp, instructions: $('#liveInstructions').value, voice: $('#liveVoice').value, speakFirst: $('#liveSpeakFirst').checked})});
+        await connection.setRemoteDescription({type: 'answer', sdp: data.sdp});
+        liveStatus('Conexão WebRTC estabelecida; aguardando o GPT-Live ficar pronto...');
+      } catch (error) {
+        liveStatus(error.message || 'Não foi possível iniciar o teste GPT-Live.');
+        cleanupLiveCall();
+      }
+    };
+    $('#liveEnd').onclick = () => {
+      if (!liveEvents || liveEvents.readyState !== 'open') return;
+      $('#liveEnd').disabled = true;
+      liveStatus('Encerrando a sessão e aguardando confirmação final...');
+      liveEvents.send(JSON.stringify({type: 'session.close'}));
+      liveCloseTimeout = setTimeout(() => {
+        liveStatus('Não chegou confirmação final; recursos locais foram liberados.');
+        cleanupLiveCall();
+      }, 15000);
+    };
   </script>
 </body>
 </html>
