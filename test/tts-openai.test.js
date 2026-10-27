@@ -131,6 +131,7 @@ class DelayedTailLiveFakeWebSocket extends LiveFakeWebSocket {
     if (event.type === 'session.instructions.append') {
       const audio = Buffer.alloc(18);
       setImmediate(() => {
+        DelayedTailLiveFakeWebSocket.lastTranscriptAt = Date.now();
         this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_transcript.delta', delta: 'Olá, este é um teste sintético de voz em português brasileiro.'})));
         this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_audio.delta', delta: audio.subarray(0, 6).toString('base64')})));
         setTimeout(() => {
@@ -140,6 +141,7 @@ class DelayedTailLiveFakeWebSocket extends LiveFakeWebSocket {
       });
     }
     if (event.type === 'session.close') {
+      DelayedTailLiveFakeWebSocket.closeAfterTranscriptMs = Date.now() - DelayedTailLiveFakeWebSocket.lastTranscriptAt;
       DelayedTailLiveFakeWebSocket.closeAfterLastAudioMs = Date.now() - DelayedTailLiveFakeWebSocket.lastAudioAt;
       setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.closed'}))));
     }
@@ -241,7 +243,7 @@ test('streams mocked GPT-Live audio to Cognigy as chunked 8 kHz WAV', async () =
   assert.equal(ended, true);
 });
 
-test('waits for the GPT-Live audio tail after the transcript matches', async () => {
+test('bounds the GPT-Live audio tail after the transcript matches', async () => {
   const response = {
     writableEnded: false,
     setHeader() {},
@@ -263,7 +265,8 @@ test('waits for the GPT-Live audio tail after the transcript matches', async () 
     fallbackCloseQuietMs: 80
   });
 
-  assert.ok(DelayedTailLiveFakeWebSocket.closeAfterLastAudioMs >= 50);
+  assert.ok(DelayedTailLiveFakeWebSocket.closeAfterTranscriptMs >= 50);
+  assert.ok(DelayedTailLiveFakeWebSocket.closeAfterTranscriptMs < 150);
 });
 
 test('streams mocked Realtime audio as chunked 8 kHz WAV', async () => {
