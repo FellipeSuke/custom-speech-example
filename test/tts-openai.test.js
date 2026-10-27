@@ -274,6 +274,40 @@ test('bounds the GPT-Live audio tail after the transcript matches', async () => 
   assert.ok(DelayedTailLiveFakeWebSocket.closeAfterTranscriptMs < 150);
 });
 
+test('reports only safe timing and transcript match diagnostics when a GPT-Live stream is cancelled', async () => {
+  const controller = new AbortController();
+  const response = {
+    writableEnded: false,
+    setHeader() {},
+    removeHeader() {},
+    flushHeaders() {},
+    write() { return true; },
+    end() { this.writableEnded = true; },
+    destroy(error) { this.destroyedWithCode = error.code; }
+  };
+  const abortTimer = setTimeout(() => controller.abort(), 20);
+
+  await assert.rejects(streamLiveTts({
+    apiKey: 'test-key',
+    voice: 'bossa',
+    text: 'Olá, este é um teste sintético.',
+    language: 'pt-BR',
+    signal: controller.signal,
+    response,
+    WebSocketImpl: LiveFakeWebSocket
+  }), (error) => {
+    assert.equal(error.code, 'cancelled');
+    assert.ok(error.ttsDiagnostics.firstAudioMs >= 0);
+    assert.equal(error.ttsDiagnostics.transcriptContainsTarget, true);
+    assert.equal(error.ttsDiagnostics.transcriptMatchesTargetExactly, true);
+    assert.equal('transcript' in error.ttsDiagnostics, false);
+    return true;
+  });
+
+  clearTimeout(abortTimer);
+  assert.equal(response.destroyedWithCode, 'cancelled');
+});
+
 test('streams mocked Realtime audio as chunked 8 kHz WAV', async () => {
   const written = [];
   const headers = {};
