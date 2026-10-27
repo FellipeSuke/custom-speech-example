@@ -87,7 +87,7 @@ class LiveFakeWebSocket extends FakeWebSocket {
     if (event.type === 'session.start') {
       setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.started'}))));
     }
-    if (event.type === 'session.commentary.append') {
+    if (event.type === 'session.instructions.append') {
       setImmediate(() => {
         this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_transcript.delta', delta: 'Olá, este é um teste sintético.'})));
         this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_audio.delta', delta: Buffer.alloc(12).toString('base64')})));
@@ -106,7 +106,7 @@ class StreamingLiveFakeWebSocket extends LiveFakeWebSocket {
     if (event.type === 'session.start') {
       setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.started'}))));
     }
-    if (event.type === 'session.commentary.append') {
+    if (event.type === 'session.instructions.append') {
       const audio = Buffer.alloc(18);
       [2000, -2000, 5000, -5000, 9000, -9000, 11000, -11000, 13000].forEach((sample, index) => audio.writeInt16LE(sample, index * 2));
       setImmediate(() => {
@@ -173,9 +173,9 @@ test('collects mocked GPT-Live audio with the Brazilian bossa voice', async () =
   assert.equal(start.session.model, 'gpt-live-1');
   assert.equal(start.session.audio.output.voice, 'bossa');
   assert.equal(start.session.audio.format.rate, 24000);
+  assert.equal(start.session.input.length, 1);
   assert.match(start.session.input[0].content[0].text, /Brazilian Portuguese/);
-  assert.equal(start.session.input[1].content[0].text, 'Olá, este é um teste sintético.');
-  const speechCommand = LiveFakeWebSocket.lastInstance.sent.find((event) => event.type === 'session.commentary.append');
+  const speechCommand = LiveFakeWebSocket.lastInstance.sent.find((event) => event.type === 'session.instructions.append');
   assert.equal(speechCommand.delegation_id, null);
   assert.match(speechCommand.content, /exactly as written/);
   const silence = LiveFakeWebSocket.lastInstance.sent.find((event) => event.type === 'session.input_audio.append');

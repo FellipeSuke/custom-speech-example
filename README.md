@@ -87,9 +87,10 @@ some depending on the environment variables supplied.
   `TTS_STREAMING_ENABLED=true` and Cognigy's **text-to-speech streaming** option
   is enabled on the speech credential, `/synthesize/openai` forwards GPT-Live
   audio deltas as chunked 8 kHz WAV so Cognigy can begin playback before the
-  full utterance is complete. GPT-Live has no explicit audio-done event; the
-  adapter uses transcript matching, an inactivity timeout, and a bounded
-  audio duration to close each one-shot session. This remains experimental:
+  full utterance is complete. Speech text is sent as a Live instruction because
+  commentary events can be paraphrased. GPT-Live has no explicit audio-done
+  event; the adapter uses transcript matching, an inactivity timeout, and a
+  bounded audio duration to close each one-shot session. This remains experimental:
   compare perceived latency and wording with Realtime before production use.
 - For lower time-to-first-audio with Cognigy streaming TTS, also set
   `TTS_STREAMING_ENABLED=true`. With Realtime this forwards audio deltas as
