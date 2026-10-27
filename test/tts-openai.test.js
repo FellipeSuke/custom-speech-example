@@ -152,6 +152,8 @@ test('collects mocked GPT-Live audio with the Brazilian bossa voice', async () =
   const speechCommand = LiveFakeWebSocket.lastInstance.sent.find((event) => event.type === 'session.commentary.append');
   assert.equal(speechCommand.delegation_id, null);
   assert.match(speechCommand.content, /exactly as written/);
+  const silence = LiveFakeWebSocket.lastInstance.sent.find((event) => event.type === 'session.input_audio.append');
+  assert.equal(Buffer.from(silence.audio, 'base64').length, 48000);
 });
 
 test('streams mocked Realtime audio as chunked 8 kHz WAV', async () => {
