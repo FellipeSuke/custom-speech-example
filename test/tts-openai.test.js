@@ -121,6 +121,31 @@ class StreamingLiveFakeWebSocket extends LiveFakeWebSocket {
   }
 }
 
+class DelayedTailLiveFakeWebSocket extends LiveFakeWebSocket {
+  send(payload) {
+    const event = JSON.parse(payload);
+    this.sent.push(event);
+    if (event.type === 'session.start') {
+      setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.started'}))));
+    }
+    if (event.type === 'session.instructions.append') {
+      const audio = Buffer.alloc(18);
+      setImmediate(() => {
+        this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_transcript.delta', delta: 'Olá, este é um teste sintético de voz em português brasileiro.'})));
+        this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_audio.delta', delta: audio.subarray(0, 6).toString('base64')})));
+        setTimeout(() => {
+          DelayedTailLiveFakeWebSocket.lastAudioAt = Date.now();
+          this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_audio.delta', delta: audio.subarray(6).toString('base64')})));
+        }, 40);
+      });
+    }
+    if (event.type === 'session.close') {
+      DelayedTailLiveFakeWebSocket.closeAfterLastAudioMs = Date.now() - DelayedTailLiveFakeWebSocket.lastAudioAt;
+      setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.closed'}))));
+    }
+  }
+}
+
 test('builds the current Realtime TTS events', () => {
   const session = buildSessionUpdate('gpt-realtime-2.1-mini', 'marin');
   assert.equal(session.type, 'session.update');
@@ -214,6 +239,31 @@ test('streams mocked GPT-Live audio to Cognigy as chunked 8 kHz WAV', async () =
   assert.ok(written.length >= 2);
   assert.ok(firstAudioMs >= 0);
   assert.equal(ended, true);
+});
+
+test('waits for the GPT-Live audio tail after the transcript matches', async () => {
+  const response = {
+    writableEnded: false,
+    setHeader() {},
+    removeHeader() {},
+    flushHeaders() {},
+    write() { return true; },
+    end() { this.writableEnded = true; },
+    destroy(error) { throw error; }
+  };
+
+  await streamLiveTts({
+    apiKey: 'test-key',
+    voice: 'bossa',
+    text: 'Olá, este é um teste sintético de voz em português brasileiro.',
+    language: 'pt-BR',
+    response,
+    WebSocketImpl: DelayedTailLiveFakeWebSocket,
+    closeQuietMs: 60,
+    fallbackCloseQuietMs: 80
+  });
+
+  assert.ok(DelayedTailLiveFakeWebSocket.closeAfterLastAudioMs >= 50);
 });
 
 test('streams mocked Realtime audio as chunked 8 kHz WAV', async () => {
