@@ -369,8 +369,10 @@ test('bounds the GPT-Live audio tail after the transcript matches', async () => 
     fallbackCloseQuietMs: 80
   });
 
-  assert.ok(DelayedTailLiveFakeWebSocket.closeAfterTranscriptMs >= 50);
-  assert.ok(DelayedTailLiveFakeWebSocket.closeAfterTranscriptMs < 150);
+  assert.ok(DelayedTailLiveFakeWebSocket.closeAfterTranscriptMs >= 90);
+  assert.ok(DelayedTailLiveFakeWebSocket.closeAfterTranscriptMs < 170);
+  assert.ok(DelayedTailLiveFakeWebSocket.closeAfterLastAudioMs >= 50);
+  assert.ok(DelayedTailLiveFakeWebSocket.closeAfterLastAudioMs < 150);
 });
 
 test('reports only safe timing and transcript match diagnostics when a GPT-Live stream is cancelled', async () => {
