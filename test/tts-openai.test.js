@@ -146,6 +146,7 @@ test('collects mocked GPT-Live audio with the Brazilian bossa voice', async () =
   const start = LiveFakeWebSocket.lastInstance.sent[0];
   assert.equal(start.session.model, 'gpt-live-1');
   assert.equal(start.session.audio.output.voice, 'bossa');
+  assert.equal(start.session.audio.format.rate, 24000);
   assert.match(start.session.input[0].content[0].text, /Brazilian Portuguese/);
   assert.equal(start.session.input[1].content[0].text, 'Olá, este é um teste sintético.');
 });
