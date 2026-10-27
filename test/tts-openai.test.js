@@ -238,6 +238,11 @@ test('streams mocked GPT-Live audio to Cognigy as chunked 8 kHz WAV', async () =
   assert.equal(wav.sampleRate, 8000);
   assert.deepEqual(Array.from({length: 3}, (_, index) => wav.pcm.readInt16LE(index * 2)), [1667, -1667, 4333]);
   assert.equal(result.bytes, 6);
+  assert.ok(result.firstAudioMs >= 0);
+  assert.ok(result.transcriptMatchedMs >= 0);
+  assert.ok(result.lastAudioChunkMs >= result.transcriptMatchedMs);
+  assert.ok(result.closeRequestedMs >= result.transcriptMatchedMs);
+  assert.ok(result.audioDurationMs >= 0);
   assert.ok(written.length >= 2);
   assert.ok(firstAudioMs >= 0);
   assert.equal(ended, true);
