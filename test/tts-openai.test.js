@@ -72,6 +72,29 @@ class StreamingFakeWebSocket extends FakeWebSocket {
   }
 }
 
+class LiveFakeWebSocket extends FakeWebSocket {
+  constructor(url, options) {
+    super();
+    this.url = url;
+    this.options = options;
+    LiveFakeWebSocket.lastInstance = this;
+  }
+
+  send(payload) {
+    const event = JSON.parse(payload);
+    this.sent.push(event);
+    if (event.type === 'session.start') {
+      setImmediate(() => {
+        this.emit('message', Buffer.from(JSON.stringify({type: 'session.started'})));
+        this.emit('message', Buffer.from(JSON.stringify({type: 'session.output_audio.delta', delta: Buffer.alloc(12).toString('base64')})));
+      });
+    }
+    if (event.type === 'session.close') {
+      setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.closed'}))));
+    }
+  }
+}
+
 test('builds the current Realtime TTS events', () => {
   const session = buildSessionUpdate('gpt-realtime-2.1-mini', 'marin');
   assert.equal(session.type, 'session.update');
@@ -101,6 +124,30 @@ test('collects mocked Realtime audio without contacting OpenAI', async () => {
   assert.equal(result.pcm.length, 12);
   assert.ok(result.durationMs >= 0);
   assert.ok(REALTIME_VOICES.includes('marin'));
+});
+
+test('collects mocked GPT-Live audio with the Brazilian bossa voice', async () => {
+  let firstAudioMs;
+  const result = await synthesizeText({
+    apiKey: 'test-key',
+    model: 'gpt-live-1',
+    transport: 'gpt_live',
+    voice: 'bossa',
+    text: 'Olá, este é um teste sintético.',
+    language: 'pt-BR',
+    WebSocketImpl: LiveFakeWebSocket,
+    onFirstAudio: (value) => { firstAudioMs = value; }
+  });
+  assert.equal(result.pcm.length, 12);
+  assert.equal(result.sampleRate, 24000);
+  assert.ok(firstAudioMs >= 0);
+  assert.match(LiveFakeWebSocket.lastInstance.url, /\/live\/sessions$/);
+  assert.equal(LiveFakeWebSocket.lastInstance.options.headers.Authorization, 'Bearer test-key');
+  const start = LiveFakeWebSocket.lastInstance.sent[0];
+  assert.equal(start.session.model, 'gpt-live-1');
+  assert.equal(start.session.audio.output.voice, 'bossa');
+  assert.match(start.session.input[0].content[0].text, /Brazilian Portuguese/);
+  assert.equal(start.session.input[1].content[0].text, 'Olá, este é um teste sintético.');
 });
 
 test('streams mocked Realtime audio as chunked 8 kHz WAV', async () => {
