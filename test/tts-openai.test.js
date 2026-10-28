@@ -25,6 +25,7 @@ class FakeWebSocket extends EventEmitter {
     super();
     this.readyState = FakeWebSocket.CONNECTING;
     this.sent = [];
+    FakeWebSocket.lastInstance = this;
     setImmediate(() => {
       this.readyState = FakeWebSocket.OPEN;
       this.emit('open');
@@ -59,6 +60,7 @@ class StreamingFakeWebSocket extends FakeWebSocket {
   send(payload) {
     const event = JSON.parse(payload);
     this.sent.push(event);
+    StreamingFakeWebSocket.lastInstance = this;
     if (event.type === 'session.update') {
       setImmediate(() => this.emit('message', Buffer.from(JSON.stringify({type: 'session.updated'}))));
       return;
@@ -178,19 +180,31 @@ test('builds the current Realtime TTS events', () => {
 
   const brazilianPortugueseResponse = buildResponseCreate('Olá, tudo bem?', 'pt-BR');
   assert.match(brazilianPortugueseResponse.response.instructions, /Brazilian Portuguese/);
+  const customInstructions = 'Fale em português brasileiro com ritmo acelerado. Reproduza exatamente o texto.';
+  const configuredResponse = buildResponseCreate('Olá, tudo bem?', 'pt-BR', customInstructions);
+  assert.equal(configuredResponse.response.instructions, customInstructions);
   assert.match(getSpeechInstructions('pt_BR'), /Brazilian Portuguese/);
 });
 
 test('collects mocked Realtime audio without contacting OpenAI', async () => {
   const result = await synthesizeText({
     apiKey: 'test-key',
+    model: 'gpt-realtime-2.1',
+    transport: 'realtime',
+    reasoningEffort: 'minimal',
     text: 'CNPJ três quatro.',
     voice: 'marin',
+    readingInstructions: 'Fale em português brasileiro com ritmo acelerado.',
     WebSocketImpl: FakeWebSocket
   });
   assert.equal(result.pcm.length, 12);
   assert.ok(result.durationMs >= 0);
   assert.ok(REALTIME_VOICES.includes('marin'));
+  const session = FakeWebSocket.lastInstance.sent.find((event) => event.type === 'session.update');
+  assert.equal(session.session.model, 'gpt-realtime-2.1');
+  assert.equal(session.session.reasoning.effort, 'minimal');
+  const response = FakeWebSocket.lastInstance.sent.find((event) => event.type === 'response.create');
+  assert.equal(response.response.instructions, 'Fale em português brasileiro com ritmo acelerado.');
 });
 
 test('collects mocked GPT-Live audio with the Brazilian bossa voice', async () => {
@@ -216,7 +230,8 @@ test('collects mocked GPT-Live audio with the Brazilian bossa voice', async () =
   assert.equal(start.session.audio.output.voice, 'bossa');
   assert.equal(start.session.audio.format.rate, 24000);
   assert.equal(start.session.input.length, 1);
-  assert.match(start.session.input[0].content[0].text, /Brazilian Portuguese/);
+  assert.equal(start.session.input[0].content[0].text, start.session.instructions);
+  assert.match(start.session.instructions, /Fale somente o texto fornecido, exatamente uma vez/);
   const speechCommand = LiveFakeWebSocket.lastInstance.sent.find((event) => event.type === 'session.instructions.append');
   assert.equal(speechCommand.delegation_id, null);
   assert.match(speechCommand.content, /Fale somente o texto fornecido, exatamente uma vez/);
@@ -436,6 +451,7 @@ test('streams mocked Realtime audio as chunked 8 kHz WAV', async () => {
     model: 'gpt-realtime-2.1-mini',
     voice: 'marin',
     text: 'Texto de teste.',
+    readingInstructions: 'Fale em ritmo lento e reproduza o texto exatamente.',
     response,
     WebSocketImpl: StreamingFakeWebSocket,
     onFirstAudio: (value) => { firstAudioMs = value; }
@@ -450,6 +466,8 @@ test('streams mocked Realtime audio as chunked 8 kHz WAV', async () => {
   assert.equal(result.bytes, 6);
   assert.equal(ended, true);
   assert.ok(firstAudioMs >= 0);
+  const responseCreate = StreamingFakeWebSocket.lastInstance.sent.find((event) => event.type === 'response.create');
+  assert.equal(responseCreate.response.instructions, 'Fale em ritmo lento e reproduza o texto exatamente.');
 });
 
 test('rejects a non-Realtime model before opening a Realtime stream', async () => {
@@ -481,6 +499,7 @@ test('supports the temporary HTTP Speech API transport with mocked fetch', async
     voice: 'marin',
     text: 'Texto de teste.',
     language: 'pt-BR',
+    readingInstructions: 'Fale em ritmo acelerado e preserve o texto exatamente.',
     fetchImpl: async (url, options) => {
       request = {url, options, body: JSON.parse(options.body)};
       return {ok: true, status: 200, arrayBuffer: async () => expectedWav};
@@ -490,7 +509,7 @@ test('supports the temporary HTTP Speech API transport with mocked fetch', async
   assert.equal(request.options.headers.Authorization, 'Bearer test-key');
   assert.equal(request.body.model, 'gpt-4o-mini-tts');
   assert.equal(request.body.response_format, 'wav');
-  assert.match(request.body.instructions, /Brazilian Portuguese/);
+  assert.equal(request.body.instructions, 'Fale em ritmo acelerado e preserve o texto exatamente.');
   assert.equal(result.sampleRate, 24000);
   assert.equal(result.pcm.length, 6);
 });
@@ -518,6 +537,7 @@ test('streams Speech API PCM as chunked 8 kHz WAV and preserves split samples', 
     voice: 'marin',
     text: 'Texto de teste.',
     language: 'pt-BR',
+    readingInstructions: 'Fale em ritmo lento e preserve o texto exatamente.',
     response,
     onFirstAudio: (value) => { firstAudioMs = value; },
     fetchImpl: async (url, options) => {
@@ -530,7 +550,7 @@ test('streams Speech API PCM as chunked 8 kHz WAV and preserves split samples', 
   assert.match(request.url, /\/audio\/speech$/);
   assert.equal(request.body.response_format, 'pcm');
   assert.equal(request.body.stream_format, 'audio');
-  assert.match(request.body.instructions, /Brazilian Portuguese/);
+  assert.equal(request.body.instructions, 'Fale em ritmo lento e preserve o texto exatamente.');
   assert.equal(headers['content-type'], 'audio/wav');
   assert.equal(headers['content-length'], undefined);
   assert.equal(wav.sampleRate, 8000);
