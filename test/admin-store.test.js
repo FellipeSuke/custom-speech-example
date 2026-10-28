@@ -23,6 +23,8 @@ test('persists speech configuration and stores only hashed Cognigy tokens', () =
     assert.equal(store.listSpeechTokens()[0].prefix, created.prefix);
     assert.equal(store.updateSettings({stt_model: 'gpt-4o-transcribe'}).stt_model, 'gpt-4o-transcribe');
     assert.equal(store.getSettings().stt_model, 'gpt-4o-transcribe');
+    assert.match(store.getSettings().tts_reading_instructions, /uma única vez/);
+    assert.equal(store.updateSettings({tts_reading_instructions: 'Leia o texto sem acrescentar nada.'}).tts_reading_instructions, 'Leia o texto sem acrescentar nada.');
     assert.equal(store.revokeSpeechToken(1), true);
     assert.equal(store.validateSpeechToken(created.token), false);
   } finally {

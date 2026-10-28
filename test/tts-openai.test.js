@@ -202,6 +202,7 @@ test('collects mocked GPT-Live audio with the Brazilian bossa voice', async () =
     voice: 'bossa',
     text: 'Olá, este é um teste sintético.',
     language: 'pt-BR',
+    readingInstructions: 'Fale somente o texto fornecido, exatamente uma vez.',
     WebSocketImpl: LiveFakeWebSocket,
     onFirstAudio: (value) => { firstAudioMs = value; }
   });
@@ -218,7 +219,9 @@ test('collects mocked GPT-Live audio with the Brazilian bossa voice', async () =
   assert.match(start.session.input[0].content[0].text, /Brazilian Portuguese/);
   const speechCommand = LiveFakeWebSocket.lastInstance.sent.find((event) => event.type === 'session.instructions.append');
   assert.equal(speechCommand.delegation_id, null);
-  assert.match(speechCommand.content, /exactly as written/);
+  assert.match(speechCommand.content, /Fale somente o texto fornecido, exatamente uma vez/);
+  assert.match(speechCommand.content, /TEXTO PARA FALAR/);
+  assert.match(speechCommand.content, /Olá, este é um teste sintético\./);
   const silence = LiveFakeWebSocket.lastInstance.sent.find((event) => event.type === 'session.input_audio.append');
   assert.equal(Buffer.from(silence.audio, 'base64').length, 48000);
 });
@@ -242,6 +245,7 @@ test('streams mocked GPT-Live audio to Cognigy as chunked 8 kHz WAV', async () =
     voice: 'bossa',
     text: 'Olá, este é um teste sintético de voz em português brasileiro.',
     language: 'pt-BR',
+    readingInstructions: 'Não acrescente nenhuma fala.',
     response,
     WebSocketImpl: StreamingLiveFakeWebSocket,
     onFirstAudio: (value) => { firstAudioMs = value; }
@@ -253,6 +257,9 @@ test('streams mocked GPT-Live audio to Cognigy as chunked 8 kHz WAV', async () =
   assert.deepEqual(Array.from({length: 3}, (_, index) => wav.pcm.readInt16LE(index * 2)), [1667, -1667, 4333]);
   assert.equal(result.bytes, 6);
   assert.equal(result.transcriptMatchesTargetExactly, true);
+  const speechCommand = StreamingLiveFakeWebSocket.lastInstance.sent.find((event) => event.type === 'session.instructions.append');
+  assert.match(speechCommand.content, /Não acrescente nenhuma fala/);
+  assert.match(speechCommand.content, /TEXTO PARA FALAR/);
   assert.ok(result.firstAudioMs >= 0);
   assert.ok(result.transcriptMatchedMs >= 0);
   assert.ok(result.lastAudioChunkMs >= result.transcriptMatchedMs);

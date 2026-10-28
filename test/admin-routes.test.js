@@ -75,6 +75,11 @@ test('admin portal authenticates and manages runtime configuration and tokens', 
   const liveConfig = await request('PUT', '/admin/api/config', {tts_model: 'gpt-live-1', tts_transport: 'gpt_live', tts_voice: 'bossa'}, cookie);
   assert.equal(liveConfig.statusCode, 200);
   assert.equal(JSON.parse(liveConfig.body).settings.tts_voice, 'bossa');
+  const promptConfig = await request('PUT', '/admin/api/config', {tts_reading_instructions: 'Leia exatamente e não converse.'}, cookie);
+  assert.equal(promptConfig.statusCode, 200);
+  assert.equal(JSON.parse(promptConfig.body).settings.tts_reading_instructions, 'Leia exatamente e não converse.');
+  const invalidPromptConfig = await request('PUT', '/admin/api/config', {tts_reading_instructions: ' '}, cookie);
+  assert.equal(invalidPromptConfig.statusCode, 400);
   const invalidLiveConfig = await request('PUT', '/admin/api/config', {tts_model: 'gpt-live-1', tts_transport: 'gpt_live', tts_voice: 'marin'}, cookie);
   assert.equal(invalidLiveConfig.statusCode, 400);
   const tempoConfig = await request('PUT', '/admin/api/config', {tts_model: 'gpt-live-1', tts_transport: 'gpt_live', tts_voice: 'tempo'}, cookie);
