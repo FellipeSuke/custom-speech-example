@@ -57,12 +57,13 @@ test('admin portal authenticates and manages runtime configuration and tokens', 
   const cookie = login.headers['set-cookie'][0].split(';')[0];
   assert.equal((await request('GET', '/admin/api/config', undefined, cookie)).statusCode, 200);
   assert.equal((await request('POST', '/admin/api/tests/gpt-live/session', {}, undefined)).statusCode, 401);
-  const invalidLiveTest = await request('POST', '/admin/api/tests/gpt-live/session', {sdp: 'offer', instructions: 'teste', voice: 'marin'}, cookie);
+  const invalidLiveTest = await request('POST', '/admin/api/tests/gpt-live/session', {sdp: 'offer', instructions: 'teste', voice: 'unsupported'}, cookie);
   assert.equal(invalidLiveTest.statusCode, 400);
   const initialConfig = JSON.parse((await request('GET', '/admin/api/config', undefined, cookie)).body);
   assert.ok(initialConfig.endpoints.some((endpoint) => endpoint.url.endsWith('/synthesize/openai')));
   assert.ok(initialConfig.ttsOptions.some((option) => option.model === 'gpt-live-1' && option.transport === 'gpt_live'));
   assert.ok(initialConfig.voices.includes('bossa'));
+  assert.ok(initialConfig.voices.includes('marin'));
   assert.ok(initialConfig.voices.includes('tempo'));
   assert.equal(initialConfig.openai.configured, false);
   const openaiKey = await request('POST', '/admin/api/openai-key', {apiKey: 'sk-test-server-side-key-1234567890'}, cookie);
@@ -72,15 +73,15 @@ test('admin portal authenticates and manages runtime configuration and tokens', 
   const config = await request('PUT', '/admin/api/config', {stt_model: 'gpt-4o-transcribe'}, cookie);
   assert.equal(config.statusCode, 200);
   assert.equal(JSON.parse(config.body).settings.stt_model, 'gpt-4o-transcribe');
-  const liveConfig = await request('PUT', '/admin/api/config', {tts_model: 'gpt-live-1', tts_transport: 'gpt_live', tts_voice: 'bossa'}, cookie);
+  const liveConfig = await request('PUT', '/admin/api/config', {tts_model: 'gpt-live-1', tts_transport: 'gpt_live', tts_voice: 'marin'}, cookie);
   assert.equal(liveConfig.statusCode, 200);
-  assert.equal(JSON.parse(liveConfig.body).settings.tts_voice, 'bossa');
+  assert.equal(JSON.parse(liveConfig.body).settings.tts_voice, 'marin');
   const promptConfig = await request('PUT', '/admin/api/config', {tts_reading_instructions: 'Leia exatamente e não converse.'}, cookie);
   assert.equal(promptConfig.statusCode, 200);
   assert.equal(JSON.parse(promptConfig.body).settings.tts_reading_instructions, 'Leia exatamente e não converse.');
   const invalidPromptConfig = await request('PUT', '/admin/api/config', {tts_reading_instructions: ' '}, cookie);
   assert.equal(invalidPromptConfig.statusCode, 400);
-  const invalidLiveConfig = await request('PUT', '/admin/api/config', {tts_model: 'gpt-live-1', tts_transport: 'gpt_live', tts_voice: 'marin'}, cookie);
+  const invalidLiveConfig = await request('PUT', '/admin/api/config', {tts_model: 'gpt-live-1', tts_transport: 'gpt_live', tts_voice: 'unsupported'}, cookie);
   assert.equal(invalidLiveConfig.statusCode, 400);
   const tempoConfig = await request('PUT', '/admin/api/config', {tts_model: 'gpt-live-1', tts_transport: 'gpt_live', tts_voice: 'tempo'}, cookie);
   assert.equal(tempoConfig.statusCode, 200);
@@ -97,7 +98,7 @@ test('direct GPT-Live test creates a WebRTC session with server-side credentials
     apiKey: 'server-only-test-key',
     sdp: 'synthetic-sdp-offer',
     instructions: 'Speak Brazilian Portuguese and wait for the caller.',
-    voice: 'bossa',
+    voice: 'marin',
     speakFirst: true,
     fetchImpl: async (url, options) => {
       requestUrl = url;
@@ -108,9 +109,10 @@ test('direct GPT-Live test creates a WebRTC session with server-side credentials
   assert.match(requestUrl, /\/live\/sessions$/);
   assert.equal(requestOptions.headers.Authorization, 'Bearer server-only-test-key');
   const payload = JSON.parse(requestOptions.body);
+  assert.equal(payload.session.audio.output.voice, 'marin');
   assert.equal(payload.session.model, 'gpt-live-1');
   assert.equal(payload.session.instructions, 'Speak Brazilian Portuguese and wait for the caller.');
-  assert.equal(payload.session.audio.output.voice, 'bossa');
+  assert.equal(payload.session.audio.output.voice, 'marin');
   assert.equal(payload.session.store, false);
   assert.equal(payload.session.input[0].role, 'developer');
   assert.equal(payload.session.input[0].content[0].text, GPT_LIVE_GREETING);

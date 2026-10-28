@@ -7,6 +7,7 @@ const {
   buildResponseCreate,
   getSpeechInstructions,
   REALTIME_VOICES,
+  LIVE_VOICES,
   REALTIME_MODELS,
   synthesizeSpeechHttp,
   streamSpeechHttp,
@@ -193,13 +194,13 @@ test('collects mocked Realtime audio without contacting OpenAI', async () => {
   assert.ok(REALTIME_VOICES.includes('marin'));
 });
 
-test('collects mocked GPT-Live audio with the Brazilian bossa voice', async () => {
+test('collects mocked GPT-Live audio with the Marin voice', async () => {
   let firstAudioMs;
   const result = await synthesizeText({
     apiKey: 'test-key',
     model: 'gpt-live-1',
     transport: 'gpt_live',
-    voice: 'bossa',
+    voice: 'marin',
     text: 'Olá, este é um teste sintético.',
     language: 'pt-BR',
     readingInstructions: 'Fale somente o texto fornecido, exatamente uma vez.',
@@ -213,7 +214,7 @@ test('collects mocked GPT-Live audio with the Brazilian bossa voice', async () =
   assert.equal(LiveFakeWebSocket.lastInstance.options.headers.Authorization, 'Bearer test-key');
   const start = LiveFakeWebSocket.lastInstance.sent[0];
   assert.equal(start.session.model, 'gpt-live-1');
-  assert.equal(start.session.audio.output.voice, 'bossa');
+  assert.equal(start.session.audio.output.voice, 'marin');
   assert.equal(start.session.audio.format.rate, 24000);
   assert.equal(start.session.input.length, 1);
   assert.match(start.session.input[0].content[0].text, /Brazilian Portuguese/);
@@ -224,6 +225,7 @@ test('collects mocked GPT-Live audio with the Brazilian bossa voice', async () =
   assert.match(speechCommand.content, /Olá, este é um teste sintético\./);
   const silence = LiveFakeWebSocket.lastInstance.sent.find((event) => event.type === 'session.input_audio.append');
   assert.equal(Buffer.from(silence.audio, 'base64').length, 48000);
+  assert.ok(LIVE_VOICES.includes('marin'));
 });
 
 test('streams mocked GPT-Live audio to Cognigy as chunked 8 kHz WAV', async () => {
